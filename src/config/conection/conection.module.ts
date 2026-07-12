@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { seedAdmin } from '../seed/seed';
 
 @Global()
 @Module({
@@ -12,19 +13,20 @@ import { DataSource } from 'typeorm';
       useFactory: async () => {
         try {
           const poolConection = new DataSource({
-            type: 'postgres',
+            type: 'mariadb',
             host: String(process.env.DB_HOST),
             port: Number(process.env.DB_PORT),
             username: String(process.env.DB_USER),
             password: String(process.env.DB_PASSWORD),
             database: String(process.env.DB_NAME),
-            entities: [],
+            entities: [__dirname + '/../../**/*.entity{.ts,.js}'],
             synchronize: true,
             ssl: false,
           });
 
           await poolConection.initialize();
           console.log('Base de datos conectada correctamente');
+          await seedAdmin(poolConection);
           return poolConection;
         } catch (error) {
           console.error('Error al conectar con la base de datos:', error);
@@ -33,5 +35,6 @@ import { DataSource } from 'typeorm';
       },
     },
   ],
+  exports: [DataSource],
 })
 export class ConectionModule {}
