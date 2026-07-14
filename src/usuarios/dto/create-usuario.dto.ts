@@ -1,14 +1,14 @@
 import {
   IsEmail,
-  IsInt,
   IsNotEmpty,
   IsString,
+  IsUUID,
   MinLength,
 } from 'class-validator';
 
 export class CreateUsuarioDto {
-  @IsInt()
-  idRol!: number;
+  @IsUUID()
+  idRol!: string;
 
   @IsString()
   @IsNotEmpty()

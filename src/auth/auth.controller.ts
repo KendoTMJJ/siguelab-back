@@ -15,6 +15,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegistroDto } from './dto/registro.dto';
 import { OlvidePasswordDto } from './dto/olvide-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ReenviarVerificacionDto } from './dto/reenviar-verificacion.dto';
 import { minutes, SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -64,6 +65,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   olvidePassword(@Body() dto: OlvidePasswordDto) {
     return this.authService.olvidePassword(dto);
+  }
+
+  @Public()
+  @Throttle({ 'reenviar-verificacion': { limit: 5, ttl: minutes(60) } })
+  @Post('reenviar-verificacion')
+  @HttpCode(HttpStatus.OK)
+  reenviarVerificacion(@Body() dto: ReenviarVerificacionDto) {
+    return this.authService.reenviarVerificacion(dto);
   }
 
   @Public()

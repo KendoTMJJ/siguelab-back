@@ -7,6 +7,8 @@ import { LoginDto } from './dto/login.dto';
 import { RegistroDto } from './dto/registro.dto';
 import { OlvidePasswordDto } from './dto/olvide-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ReenviarVerificacionDto } from './dto/reenviar-verificacion.dto';
+import { Usuario } from 'src/usuarios/entities/usuario.entity';
 import { JwtPayload } from './jwt/jwt-payload.interface';
 import { TokenAuthService } from './token-auth.service';
 import { TipoToken } from './entities/token-auth.entity';
@@ -28,16 +30,7 @@ export class AuthService {
     return dominios.includes(dominioCorreo);
   }
 
-  async registro(registroDto: RegistroDto) {
-    if (!this.dominioPermitido(registroDto.correo)) {
-      throw new HttpException(
-        'El correo debe pertenecer a un dominio institucional',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    const usuario = await this.usuariosService.registrarPublico(registroDto);
-
+  private async enviarCorreoVerificacion(usuario: Usuario): Promise<void> {
     const tokenPlano = await this.tokenAuthService.generar(
       usuario,
       TipoToken.VERIFICACION,
@@ -51,9 +44,34 @@ export class AuthService {
       `<p>Hola ${usuario.nombre}, confirma tu correo haciendo clic en el siguiente enlace (expira en 24h):</p>
        <p><a href="${link}">${link}</a></p>`,
     );
+  }
+
+  async registro(registroDto: RegistroDto) {
+    if (!this.dominioPermitido(registroDto.correo)) {
+      throw new HttpException(
+        'El correo debe pertenecer a un dominio institucional',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const usuario = await this.usuariosService.registrarPublico(registroDto);
+    await this.enviarCorreoVerificacion(usuario);
 
     return {
       mensaje: 'Registro exitoso. Revisa tu correo para verificar tu cuenta.',
+    };
+  }
+
+  async reenviarVerificacion(dto: ReenviarVerificacionDto) {
+    const usuario = await this.usuariosService.findByCorreo(dto.correo);
+
+    if (usuario && !usuario.correoVerificado) {
+      await this.enviarCorreoVerificacion(usuario);
+    }
+
+    return {
+      mensaje:
+        'Si el correo existe y no ha sido verificado, recibirás un nuevo enlace de verificación.',
     };
   }
 

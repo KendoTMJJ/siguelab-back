@@ -15,8 +15,8 @@ export enum TipoToken {
 
 @Entity('token_auth')
 export class TokenAuth {
-  @PrimaryGeneratedColumn({ name: 'id_token' })
-  idToken!: number;
+  @PrimaryGeneratedColumn('uuid', { name: 'id_token' })
+  idToken!: string;
 
   @ManyToOne(() => Usuario, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'id_usuario' })

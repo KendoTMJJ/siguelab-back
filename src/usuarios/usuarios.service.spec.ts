@@ -19,13 +19,18 @@ describe('UsuariosService', () => {
   };
   let rolRepository: { findOne: jest.Mock };
 
-  const rolEstudiante: Rol = { idRol: 6, nombre: 'estudiante' };
+  const UUID_ROL = 'b1f0c1d2-1111-4a2b-9c3d-000000000001';
+  const UUID_USUARIO = 'b1f0c1d2-2222-4a2b-9c3d-000000000002';
+
+  const rolEstudiante: Rol = { idRol: UUID_ROL, nombre: 'estudiante' };
 
   beforeEach(async () => {
     usuarioRepository = {
       findOne: jest.fn(),
       create: jest.fn((data) => data),
-      save: jest.fn((data) => Promise.resolve({ ...data, idUsuario: 1 })),
+      save: jest.fn((data) =>
+        Promise.resolve({ ...data, idUsuario: UUID_USUARIO }),
+      ),
       find: jest.fn(),
       update: jest.fn(),
       softRemove: jest.fn(),
@@ -58,7 +63,7 @@ describe('UsuariosService', () => {
     };
 
     it('lanza CONFLICT si el correo ya está registrado', async () => {
-      usuarioRepository.findOne.mockResolvedValue({ idUsuario: 1 });
+      usuarioRepository.findOne.mockResolvedValue({ idUsuario: UUID_USUARIO });
 
       await expect(service.registrarPublico(datos)).rejects.toMatchObject({
         status: HttpStatus.CONFLICT,
@@ -91,7 +96,7 @@ describe('UsuariosService', () => {
 
   describe('registrarIntentoFallido', () => {
     const usuarioBase: Usuario = {
-      idUsuario: 1,
+      idUsuario: UUID_USUARIO,
       intentosFallidos: 0,
       bloqueadoHasta: null,
     } as Usuario;
@@ -102,7 +107,7 @@ describe('UsuariosService', () => {
         intentosFallidos: 3,
       });
 
-      expect(usuarioRepository.update).toHaveBeenCalledWith(1, {
+      expect(usuarioRepository.update).toHaveBeenCalledWith(UUID_USUARIO, {
         intentosFallidos: 4,
         bloqueadoHasta: null,
       });
@@ -127,9 +132,9 @@ describe('UsuariosService', () => {
 
   describe('registrarLoginExitoso', () => {
     it('resetea intentos fallidos y desbloquea la cuenta', async () => {
-      await service.registrarLoginExitoso(1);
+      await service.registrarLoginExitoso(UUID_USUARIO);
 
-      expect(usuarioRepository.update).toHaveBeenCalledWith(1, {
+      expect(usuarioRepository.update).toHaveBeenCalledWith(UUID_USUARIO, {
         intentosFallidos: 0,
         bloqueadoHasta: null,
       });
@@ -138,9 +143,9 @@ describe('UsuariosService', () => {
 
   describe('marcarCorreoVerificado', () => {
     it('marca correoVerificado en true', async () => {
-      await service.marcarCorreoVerificado(1);
+      await service.marcarCorreoVerificado(UUID_USUARIO);
 
-      expect(usuarioRepository.update).toHaveBeenCalledWith(1, {
+      expect(usuarioRepository.update).toHaveBeenCalledWith(UUID_USUARIO, {
         correoVerificado: true,
       });
     });
@@ -150,16 +155,16 @@ describe('UsuariosService', () => {
     it('lanza NOT_FOUND si el usuario no existe', async () => {
       usuarioRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.findOne(999)).rejects.toMatchObject({
+      await expect(service.findOne('id-que-no-existe')).rejects.toMatchObject({
         status: HttpStatus.NOT_FOUND,
       });
     });
 
     it('retorna el usuario con su rol si existe', async () => {
-      const usuario = { idUsuario: 1, estado: EstadoUsuario.ACTIVO };
+      const usuario = { idUsuario: UUID_USUARIO, estado: EstadoUsuario.ACTIVO };
       usuarioRepository.findOne.mockResolvedValue(usuario);
 
-      await expect(service.findOne(1)).resolves.toEqual(usuario);
+      await expect(service.findOne(UUID_USUARIO)).resolves.toEqual(usuario);
     });
   });
 });

@@ -16,8 +16,8 @@ export enum EstadoUsuario {
 
 @Entity('usuario')
 export class Usuario {
-  @PrimaryGeneratedColumn({ name: 'id_usuario' })
-  idUsuario!: number;
+  @PrimaryGeneratedColumn('uuid', { name: 'id_usuario' })
+  idUsuario!: string;
 
   @ManyToOne(() => Rol)
   @JoinColumn({ name: 'id_rol' })

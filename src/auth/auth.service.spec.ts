@@ -18,7 +18,7 @@ describe('AuthService', () => {
 
   const usuarioBase = (overrides: Partial<Usuario> = {}): Usuario =>
     ({
-      idUsuario: 1,
+      idUsuario: 'b1f0c1d2-2222-4a2b-9c3d-000000000002',
       nombre: 'Test',
       correo: 'test@usantoto.edu.co',
       contrasena: 'hash-guardado',
@@ -27,7 +27,10 @@ describe('AuthService', () => {
       intentosFallidos: 0,
       bloqueadoHasta: null,
       tokenVersion: 0,
-      rol: { idRol: 6, nombre: 'estudiante' },
+      rol: {
+        idRol: 'b1f0c1d2-1111-4a2b-9c3d-000000000001',
+        nombre: 'estudiante',
+      },
       ...overrides,
     }) as Usuario;
 
@@ -234,6 +237,48 @@ describe('AuthService', () => {
       );
 
       await service.olvidePassword({ correo: 'test@usantoto.edu.co' });
+
+      expect(mailService.sendMail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reenviarVerificacion', () => {
+    it('responde el mismo mensaje si el correo no existe, sin enviar correo', async () => {
+      usuariosService.findByCorreo!.mockResolvedValue(null);
+
+      const resultado = await service.reenviarVerificacion({
+        correo: 'noexiste@usantoto.edu.co',
+      });
+
+      expect(mailService.sendMail).not.toHaveBeenCalled();
+      expect(resultado.mensaje).toContain('Si el correo existe');
+    });
+
+    it('reenvía el correo si el usuario existe y aún no está verificado', async () => {
+      const usuario = usuarioBase({ correoVerificado: false });
+      usuariosService.findByCorreo!.mockResolvedValue(usuario);
+      tokenAuthService.generar!.mockResolvedValue('token-nuevo');
+
+      await service.reenviarVerificacion({ correo: usuario.correo });
+
+      expect(tokenAuthService.generar).toHaveBeenCalledWith(
+        usuario,
+        TipoToken.VERIFICACION,
+        24 * 60,
+      );
+      expect(mailService.sendMail).toHaveBeenCalledWith(
+        usuario.correo,
+        expect.any(String),
+        expect.stringContaining('token-nuevo'),
+      );
+    });
+
+    it('no reenvía el correo si el usuario ya está verificado', async () => {
+      usuariosService.findByCorreo!.mockResolvedValue(
+        usuarioBase({ correoVerificado: true }),
+      );
+
+      await service.reenviarVerificacion({ correo: 'test@usantoto.edu.co' });
 
       expect(mailService.sendMail).not.toHaveBeenCalled();
     });

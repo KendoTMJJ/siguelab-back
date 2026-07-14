@@ -90,7 +90,7 @@ export class UsuariosService {
     return this.usuarioRepository.find({ relations: { rol: true } });
   }
 
-  async findOne(id: number): Promise<Usuario> {
+  async findOne(id: string): Promise<Usuario> {
     const usuario = await this.usuarioRepository.findOne({
       where: { idUsuario: id },
       relations: { rol: true },
@@ -111,7 +111,7 @@ export class UsuariosService {
   }
 
   async update(
-    id: number,
+    id: string,
     updateUsuarioDto: UpdateUsuarioDto,
   ): Promise<Usuario> {
     try {
@@ -134,16 +134,16 @@ export class UsuariosService {
     }
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     const usuario = await this.findOne(id);
     await this.usuarioRepository.softRemove(usuario);
   }
 
-  async marcarCorreoVerificado(id: number): Promise<void> {
+  async marcarCorreoVerificado(id: string): Promise<void> {
     await this.usuarioRepository.update(id, { correoVerificado: true });
   }
 
-  async registrarLoginExitoso(id: number): Promise<void> {
+  async registrarLoginExitoso(id: string): Promise<void> {
     await this.usuarioRepository.update(id, {
       intentosFallidos: 0,
       bloqueadoHasta: null,
@@ -164,7 +164,7 @@ export class UsuariosService {
     });
   }
 
-  async cambiarContrasena(id: number, contrasena: string): Promise<void> {
+  async cambiarContrasena(id: string, contrasena: string): Promise<void> {
     await this.usuarioRepository
       .createQueryBuilder()
       .update(Usuario)

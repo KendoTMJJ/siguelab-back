@@ -33,7 +33,7 @@ export class RolesService {
     return this.rolRepository.find();
   }
 
-  async findOne(id: number): Promise<Rol> {
+  async findOne(id: string): Promise<Rol> {
     const rol = await this.rolRepository.findOne({ where: { idRol: id } });
     if (!rol) {
       throw new HttpException('Rol no encontrado', HttpStatus.NOT_FOUND);
@@ -41,7 +41,7 @@ export class RolesService {
     return rol;
   }
 
-  async update(id: number, updateRoleDto: UpdateRoleDto): Promise<Rol> {
+  async update(id: string, updateRoleDto: UpdateRoleDto): Promise<Rol> {
     await this.findOne(id);
 
     try {
@@ -58,7 +58,7 @@ export class RolesService {
     }
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     await this.findOne(id);
 
     try {

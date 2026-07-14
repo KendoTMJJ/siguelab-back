@@ -4,6 +4,7 @@
 /build
 /.pnpm-store
 
+docs/
 # Logs
 logs
 *.log
