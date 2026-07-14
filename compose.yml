@@ -14,15 +14,16 @@ services:
       - db
 
   db:
-    image: postgres:16-alpine
+    image: mariadb:11
     environment:
-      POSTGRES_USER: sigelab
-      POSTGRES_PASSWORD: sigelab
-      POSTGRES_DB: sigelab
+      MARIADB_USER: sigelab
+      MARIADB_PASSWORD: sigelab
+      MARIADB_DATABASE: sigelab
+      MARIADB_ROOT_PASSWORD: sigelab
     ports:
-      - "5432:5432"
+      - "3307:3306"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mariadbdata:/var/lib/mysql
 
 volumes:
-  pgdata:
+  mariadbdata:

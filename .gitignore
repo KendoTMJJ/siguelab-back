@@ -2,7 +2,9 @@
 /dist
 /node_modules
 /build
+/.pnpm-store
 
+docs/
 # Logs
 logs
 *.log

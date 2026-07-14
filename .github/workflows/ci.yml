@@ -1,0 +1,67 @@
+name: "Run Tests on Pull Request"
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: test
+          MARIADB_DATABASE: sigelab_test
+          MARIADB_USER: sigelab
+          MARIADB_PASSWORD: sigelab
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h localhost -uroot -ptest"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      PORT: 3000
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: sigelab
+      DB_PASSWORD: sigelab
+      DB_NAME: sigelab_test
+      JWT_SECRET: test-secret-ci
+      FRONTEND_URL: http://localhost:5173
+      ALLOWED_EMAIL_DOMAINS: usantoto.edu.co,ustatunja.edu.co
+      SEED_ADMIN_NAME: Administrador
+      SEED_ADMIN_EMAIL: admin@sigelab.local
+      SEED_ADMIN_PASSWORD: TestAdmin123!
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint:check
+
+      - name: Unit tests
+        run: pnpm run test
+
+      - name: E2E tests
+        run: pnpm run test:e2e
