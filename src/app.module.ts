@@ -16,10 +16,10 @@ import { ThrottlerCustomGuard } from './auth/jwt/throttler-custom.guard';
     ConectionModule,
     ThrottlerModule.forRoot({
       throttlers: [
-        { name: 'default', ttl: minutes(1), limit: 30 },
-        { name: 'login', ttl: minutes(60), limit: 5 },
-        { name: 'olvide-password', ttl: minutes(60), limit: 5 },
-        { name: 'reenviar-verificacion', ttl: minutes(60), limit: 5 },
+        // { name: 'default', ttl: minutes(1), limit: 30 },
+        // { name: 'login', ttl: minutes(60), limit: 5 },
+        // { name: 'olvide-password', ttl: minutes(60), limit: 5 },
+        // { name: 'reenviar-verificacion', ttl: minutes(60), limit: 5 },
       ],
     }),
     UsuariosModule,
