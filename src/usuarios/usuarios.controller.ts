@@ -34,6 +34,11 @@ export class UsuariosController {
     return this.usuariosService.findOne(id);
   }
 
+  @Get('nombre/:nombreUsuario')
+  findByNombre(@Param('nombreUsuario') nombreUsuario: string) {
+    return this.usuariosService.findByNombre(nombreUsuario);
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateUsuarioDto: UpdateUsuarioDto) {
     return this.usuariosService.update(id, updateUsuarioDto);

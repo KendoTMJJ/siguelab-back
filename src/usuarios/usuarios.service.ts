@@ -100,6 +100,15 @@ export class UsuariosService {
     }
     return usuario;
   }
+  async findByNombre(nombreUsuario: string): Promise<Usuario[]> {
+    return this.usuarioRepository
+      .createQueryBuilder('usuario')
+      .leftJoinAndSelect('usuario.rol', 'rol')
+      .where('LOWER(usuario.nombre) LIKE LOWER(:nombre)', {
+        nombre: `%${nombreUsuario}%`,
+      })
+      .getMany();
+  }
 
   async findByCorreo(correo: string): Promise<Usuario | null> {
     return this.usuarioRepository
