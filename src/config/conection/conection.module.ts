@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { seedAdmin } from '../seed/seed';
+import { seedCatalogos } from '../../catalogos/seed/catalogos.seed';
 
 @Global()
 @Module({
@@ -27,6 +28,7 @@ import { seedAdmin } from '../seed/seed';
           await poolConection.initialize();
           console.log('Base de datos conectada correctamente');
           await seedAdmin(poolConection);
+          await seedCatalogos(poolConection);
           return poolConection;
         } catch (error) {
           console.error('Error al conectar con la base de datos:', error);

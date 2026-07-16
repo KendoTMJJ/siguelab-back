@@ -3,8 +3,8 @@ import * as bcrypt from 'bcrypt';
 import { DataSource, Repository } from 'typeorm';
 import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
-import { Usuario } from './entities/usuario.entity';
 import { Rol } from 'src/roles/entities/rol.entity';
+import { Usuario } from './entities/usuario.entity';
 
 const ROL_REGISTRO_PUBLICO = 'estudiante';
 
