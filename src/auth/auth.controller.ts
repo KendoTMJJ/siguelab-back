@@ -49,6 +49,8 @@ export class AuthController {
   ) {
     const { access_token, usuario } = await this.authService.login(loginDto);
 
+    console.log('access_token:', access_token);
+
     res.cookie('access_token', access_token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

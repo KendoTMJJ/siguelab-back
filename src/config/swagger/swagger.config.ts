@@ -16,6 +16,26 @@ export function setupSwagger(app: INestApplication): void {
     )
     .addTag('usuarios', 'Gestión de usuarios (requiere rol admin)')
     .addTag('roles', 'Gestión de roles (requiere rol admin)')
+    .addTag(
+      'Divisiones',
+      'Catálogo de divisiones académicas (lectura para cualquier autenticado, escritura solo admin)',
+    )
+    .addTag(
+      'Facultades',
+      'Catálogo de facultades, agrupadas por división (lectura para cualquier autenticado, escritura solo admin)',
+    )
+    .addTag(
+      'Espacios académicos',
+      'Catálogo plano de espacios/materias, sin relación con facultad (lectura para cualquier autenticado, escritura solo admin)',
+    )
+    .addTag(
+      'Tipos de reserva',
+      'Catálogo de tipos de reserva y sus flags de negocio (lectura para cualquier autenticado, escritura solo admin)',
+    )
+    .addTag(
+      'Periodos académicos',
+      'Catálogo de periodos académicos (lectura para cualquier autenticado, escritura solo admin)',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
