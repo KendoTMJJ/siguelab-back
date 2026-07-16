@@ -36,6 +36,22 @@ export function setupSwagger(app: INestApplication): void {
       'Periodos académicos',
       'Catálogo de periodos académicos (lectura para cualquier autenticado, escritura solo admin)',
     )
+    .addTag(
+      'Laboratorios',
+      'Espacios físicos reservables y sus asociaciones con espacios académicos y docentes encargados',
+    )
+    .addTag(
+      'Horarios académicos',
+      'Clases ya programadas que bloquean el calendario como reservas exclusivas',
+    )
+    .addTag(
+      'Solicitudes',
+      'Solicitudes de reserva y su flujo de firmas (docente → laboratorista)',
+    )
+    .addTag(
+      'Notificaciones',
+      'Notificaciones internas disparadas por el flujo de solicitudes',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

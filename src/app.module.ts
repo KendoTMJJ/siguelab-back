@@ -7,6 +7,10 @@ import { UsuariosModule } from './usuarios/usuarios.module';
 import { RolesModule } from './roles/roles.module';
 import { AuthModule } from './auth/auth.module';
 import { CatalogosModule } from './catalogos/catalogos.module';
+import { LaboratoriosModule } from './laboratorios/laboratorios.module';
+import { HorariosAcademicosModule } from './horarios-academicos/horarios-academicos.module';
+import { NotificacionesModule } from './notificaciones/notificaciones.module';
+import { SolicitudesModule } from './solicitudes/solicitudes.module';
 import { JwtGuard } from './auth/jwt/jwt.guard';
 import { RolesGuard } from './auth/jwt/roles.guard';
 import { ThrottlerCustomGuard } from './auth/jwt/throttler-custom.guard';
@@ -27,6 +31,10 @@ import { ThrottlerCustomGuard } from './auth/jwt/throttler-custom.guard';
     RolesModule,
     AuthModule,
     CatalogosModule,
+    LaboratoriosModule,
+    HorariosAcademicosModule,
+    NotificacionesModule,
+    SolicitudesModule,
   ],
   controllers: [],
   providers: [
