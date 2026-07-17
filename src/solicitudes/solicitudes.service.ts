@@ -101,13 +101,27 @@ export class SolicitudesService {
     return DIAS_SEMANA_POR_INDICE[indice];
   }
 
+  /**
+   * Las horas del DTO llegan como "HH:mm" pero las que vuelven de la BD
+   * (columnas TIME) llegan como "HH:mm:ss" — comparar strings de distinta
+   * longitud produce falsos cruces (ej. "09:00" < "09:00:00" es true por
+   * ser prefijo). Se normalizan ambas a "HH:mm:ss" antes de comparar.
+   */
+  private normalizarHora(hora: string): string {
+    return hora.length === 5 ? `${hora}:00` : hora;
+  }
+
   private horasCruzan(
     inicioA: string,
     finA: string,
     inicioB: string,
     finB: string,
   ): boolean {
-    return inicioA < finB && finA > inicioB;
+    const iA = this.normalizarHora(inicioA);
+    const fA = this.normalizarHora(finA);
+    const iB = this.normalizarHora(inicioB);
+    const fB = this.normalizarHora(finB);
+    return iA < fB && fA > iB;
   }
 
   private consumoCupos(numPersonas: number): number {

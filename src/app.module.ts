@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerModule, minutes } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { ConectionModule } from './config/conection/conection.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { RolesModule } from './roles/roles.module';
