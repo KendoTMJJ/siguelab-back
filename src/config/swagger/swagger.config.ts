@@ -52,6 +52,10 @@ export function setupSwagger(app: INestApplication): void {
       'Notificaciones',
       'Notificaciones internas disparadas por el flujo de solicitudes',
     )
+    .addTag(
+      'Bitácora',
+      'Registro de uso real de los laboratorios (historia; no se borra)',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
