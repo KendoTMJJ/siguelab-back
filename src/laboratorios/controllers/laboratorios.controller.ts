@@ -86,13 +86,12 @@ export class LaboratoriosController {
   }
 
   @Get(':id/espacios-academicos')
-  @Roles('admin')
   @ApiOperation({
-    summary: 'Vista inversa: espacios académicos asociados a un laboratorio',
+    summary:
+      'Vista inversa: espacios académicos asociados a un laboratorio (cualquier rol autenticado — es el filtro que usa el formulario de solicitudes)',
   })
   @ApiResponse({ status: 200, description: 'Listado de espacios académicos' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
-  @ApiResponse({ status: 403, description: 'Rol insuficiente' })
   @ApiResponse({ status: 404, description: 'Laboratorio no encontrado' })
   espaciosAcademicos(@Param('id', ParseIntPipe) id: number) {
     return this.espaciosLaboratorioService.espaciosDeLaboratorio(id);

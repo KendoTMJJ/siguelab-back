@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
 import { Laboratorio } from 'src/laboratorios/entities/laboratorio.entity';
+import { EspacioLaboratorio } from 'src/laboratorios/entities/espacio-laboratorio.entity';
 import { EspacioAcademico } from 'src/catalogos/entities/espacio-academico.entity';
 import { PeriodoAcademico } from 'src/catalogos/entities/periodo-academico.entity';
 import { Usuario } from 'src/usuarios/entities/usuario.entity';
@@ -23,6 +24,7 @@ export class HorariosAcademicosService {
   private readonly horarioRepository: Repository<HorarioAcademico>;
   private readonly laboratorioRepository: Repository<Laboratorio>;
   private readonly espacioAcademicoRepository: Repository<EspacioAcademico>;
+  private readonly espacioLaboratorioRepository: Repository<EspacioLaboratorio>;
   private readonly periodoAcademicoRepository: Repository<PeriodoAcademico>;
   private readonly usuarioRepository: Repository<Usuario>;
 
@@ -31,6 +33,8 @@ export class HorariosAcademicosService {
     this.laboratorioRepository = this.dataSource.getRepository(Laboratorio);
     this.espacioAcademicoRepository =
       this.dataSource.getRepository(EspacioAcademico);
+    this.espacioLaboratorioRepository =
+      this.dataSource.getRepository(EspacioLaboratorio);
     this.periodoAcademicoRepository =
       this.dataSource.getRepository(PeriodoAcademico);
     this.usuarioRepository = this.dataSource.getRepository(Usuario);
@@ -97,6 +101,32 @@ export class HorariosAcademicosService {
     }
   }
 
+  /**
+   * El horario académico declara idLaboratorio + idEspacio, pero
+   * SolicitudesService valida la asociación laboratorio↔espacio contra la
+   * tabla puente espacio_laboratorio (independiente, pensada para el CRUD
+   * admin de EspaciosLaboratorioService). Sin esto, un horario recién creado
+   * queda con un espacio "no asociado" según esa validación aunque el propio
+   * horario lo especifique — se sincroniza el vínculo aquí para que ambas
+   * fuentes de verdad no diverjan.
+   */
+  private async asegurarAsociacionEspacioLaboratorio(
+    idLaboratorio: number,
+    idEspacio: number,
+  ): Promise<void> {
+    const existente = await this.espacioLaboratorioRepository.exists({
+      where: { idLaboratorio, idEspacio },
+    });
+    if (existente) {
+      return;
+    }
+    const asociacion = this.espacioLaboratorioRepository.create({
+      idLaboratorio,
+      idEspacio,
+    });
+    await this.espacioLaboratorioRepository.save(asociacion);
+  }
+
   async create(
     createHorarioAcademicoDto: CreateHorarioAcademicoDto,
   ): Promise<HorarioAcademico> {
@@ -111,6 +141,11 @@ export class HorariosAcademicosService {
     if (createHorarioAcademicoDto.idDocente) {
       await this.validarDocente(createHorarioAcademicoDto.idDocente);
     }
+
+    await this.asegurarAsociacionEspacioLaboratorio(
+      createHorarioAcademicoDto.idLaboratorio,
+      createHorarioAcademicoDto.idEspacio,
+    );
 
     try {
       const horario = this.horarioRepository.create(createHorarioAcademicoDto);
@@ -177,6 +212,13 @@ export class HorariosAcademicosService {
     }
     if (updateHorarioAcademicoDto.idDocente) {
       await this.validarDocente(updateHorarioAcademicoDto.idDocente);
+    }
+
+    if (updateHorarioAcademicoDto.idLaboratorio || updateHorarioAcademicoDto.idEspacio) {
+      await this.asegurarAsociacionEspacioLaboratorio(
+        updateHorarioAcademicoDto.idLaboratorio ?? actual.idLaboratorio,
+        updateHorarioAcademicoDto.idEspacio ?? actual.idEspacio,
+      );
     }
 
     try {

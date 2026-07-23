@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx --no-install tsc --noEmit -p tsconfig.json)",
+      "Bash(npm ls *)",
+      "Bash(npx --prefix \"c:/Users/Julian/Desktop/Semestres/Comunicación/Siguelab/siguelab-front\" tsc --noEmit -p \"c:/Users/Julian/Desktop/Semestres/Comunicación/Siguelab/siguelab-front/tsconfig.app.json\")",
+      "Bash(npx --prefix \"c:/Users/Julian/Desktop/Semestres/Comunicación/Siguelab/siguelab-front\" ng build --configuration development)",
+      "Bash(rm -rf \"c:/Users/Julian/Desktop/Semestres/Comunicación/Siguelab/siguelab-front/dist\")",
+      "Bash(npx --prefix \"c:/Users/Julian/Desktop/Semestres/Comunicación/Siguelab/siguelab-back\" tsc --noEmit -p \"c:/Users/Julian/Desktop/Semestres/Comunicación/Siguelab/siguelab-back/tsconfig.json\")",
+      "Bash(docker restart *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Julian\\Desktop\\Semestres\\Comunicación\\Siguelab\\siguelab-front\\dist"
+    ]
+  }
+}
