@@ -19,6 +19,7 @@ import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorator';
 import { SolicitudesService } from './solicitudes.service';
 import { CreateSolicitudDto } from './dto/create-solicitud.dto';
+import { CreateSolicitudDirectaDto } from './dto/create-solicitud-directa.dto';
 import { RechazarSolicitudDto } from './dto/rechazar-solicitud.dto';
 import { CancelarSolicitudDto } from './dto/cancelar-solicitud.dto';
 import { EstadoSolicitud } from './entities/solicitud-reserva.entity';
@@ -55,6 +56,34 @@ export class SolicitudesController {
     @CurrentUser() usuario: AuthenticatedUser,
   ) {
     return this.solicitudesService.create(createSolicitudDto, usuario);
+  }
+
+  @Post('directa')
+  @Roles('admin')
+  @ApiOperation({
+    summary:
+      'Crear una solicitud ya aprobada, sin firmas (solo admin)',
+  })
+  @ApiResponse({ status: 201, description: 'Solicitud creada y aprobada' })
+  @ApiResponse({
+    status: 400,
+    description: 'Datos inválidos (reglas de negocio)',
+  })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Rol insuficiente (solo admin)' })
+  @ApiResponse({
+    status: 404,
+    description: 'Alguna entidad referenciada no existe',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Sin disponibilidad u otro conflicto',
+  })
+  crearDirecta(
+    @Body() dto: CreateSolicitudDirectaDto,
+    @CurrentUser() usuario: AuthenticatedUser,
+  ) {
+    return this.solicitudesService.crearDirecta(dto, usuario);
   }
 
   @Get('mias')

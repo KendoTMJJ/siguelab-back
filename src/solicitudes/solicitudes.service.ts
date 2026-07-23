@@ -26,6 +26,7 @@ import {
 } from './entities/solicitud-reserva.entity';
 import { Firma, ResultadoFirma, RolFirmante } from './entities/firma.entity';
 import { CreateSolicitudDto } from './dto/create-solicitud.dto';
+import { CreateSolicitudDirectaDto } from './dto/create-solicitud-directa.dto';
 import { RechazarSolicitudDto } from './dto/rechazar-solicitud.dto';
 import { CancelarSolicitudDto } from './dto/cancelar-solicitud.dto';
 
@@ -523,6 +524,231 @@ export class SolicitudesService {
     }
 
     return this.findOne(solicitudCreada.idSolicitud, solicitante);
+  }
+
+  /**
+   * Creación directa reservada a admin: se salta el flujo de firmas y la
+   * antelación mínima, pero NO se salta ninguna validación de disponibilidad
+   * (verificarDisponibilidad/horasCruzan corren igual que en create()) ni la
+   * de fecha pasada. Queda aprobada de inmediato, con firmas ya resueltas
+   * (idFirmante = admin) para dejar trazabilidad de quién la generó.
+   */
+  async crearDirecta(
+    dto: CreateSolicitudDirectaDto,
+    admin: AuthenticatedUser,
+  ): Promise<SolicitudReserva> {
+    const tipoReserva = await this.tipoReservaRepository.findOne({
+      where: { idTipo: dto.idTipo },
+    });
+    if (!tipoReserva) {
+      throw new HttpException(
+        'Tipo de reserva no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    if (tipoReserva.requiereEspacio && !dto.idEspacio) {
+      throw new HttpException(
+        'Este tipo de reserva exige elegir un espacio académico',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (dto.idEspacio) {
+      const espacio = await this.espacioAcademicoRepository.findOne({
+        where: { idEspacio: dto.idEspacio },
+      });
+      if (!espacio) {
+        throw new HttpException(
+          'Espacio académico no encontrado',
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      const espacioAsociado = await this.espacioLaboratorioRepository.exists({
+        where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
+      });
+      if (!espacioAsociado) {
+        throw new HttpException(
+          'El laboratorio elegido no está asociado a ese espacio académico',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
+
+    const docenteAsociado = await this.docenteLaboratorioRepository.exists({
+      where: {
+        idUsuario: dto.idDocenteEncargado,
+        idLaboratorio: dto.idLaboratorio,
+      },
+    });
+    if (!docenteAsociado) {
+      throw new HttpException(
+        'El docente encargado no está asociado a este laboratorio',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const laboratorio = await this.laboratorioRepository.findOne({
+      where: { idLaboratorio: dto.idLaboratorio },
+    });
+    if (!laboratorio) {
+      throw new HttpException(
+        'Laboratorio no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (laboratorio.estado === EstadoLaboratorio.INACTIVO) {
+      throw new HttpException(
+        'El laboratorio está inactivo',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    if (
+      (dto.grupoAsignatura || dto.numGruposTrabajo) &&
+      !tipoReserva.esExclusiva
+    ) {
+      throw new HttpException(
+        'grupoAsignatura/numGruposTrabajo solo aplican para un tipo exclusivo',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const periodo = await this.periodoAcademicoRepository.findOne({
+      where: { idPeriodo: dto.idPeriodo },
+    });
+    if (!periodo) {
+      throw new HttpException(
+        'Periodo académico no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (
+      dto.fechaPractica < periodo.fechaInicio ||
+      dto.fechaPractica > periodo.fechaFin
+    ) {
+      throw new HttpException(
+        'La fecha de práctica está fuera del periodo académico',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (dto.semana && (dto.semana < 1 || dto.semana > periodo.numSemanas)) {
+      throw new HttpException(
+        `semana debe estar entre 1 y ${periodo.numSemanas}`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (dto.horaFin <= dto.horaInicio) {
+      throw new HttpException(
+        'La hora de fin debe ser posterior a la hora de inicio',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const hoy = new Date();
+    hoy.setUTCHours(0, 0, 0, 0);
+    if (new Date(`${dto.fechaPractica}T00:00:00Z`) < hoy) {
+      throw new HttpException(
+        'La fecha de práctica no puede ser en el pasado',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const facultad = await this.facultadRepository.findOne({
+      where: { idFacultad: dto.idFacultad },
+    });
+    if (!facultad) {
+      throw new HttpException('Facultad no encontrada', HttpStatus.NOT_FOUND);
+    }
+
+    const disponibilidad = await this.verificarDisponibilidad({
+      idLaboratorio: dto.idLaboratorio,
+      capacidadLaboratorio: laboratorio.capacidad,
+      fechaPractica: dto.fechaPractica,
+      horaInicio: dto.horaInicio,
+      horaFin: dto.horaFin,
+      esExclusiva: tipoReserva.esExclusiva,
+      numPersonas: dto.numPersonas,
+    });
+    if (!disponibilidad.disponible) {
+      throw new HttpException(
+        `Sin disponibilidad: ${disponibilidad.motivo}`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const ahora = new Date();
+    const solicitudCreada = await this.dataSource.transaction(
+      async (manager) => {
+        const solicitudRepo = manager.getRepository(SolicitudReserva);
+        const firmaRepo = manager.getRepository(Firma);
+
+        const solicitud = solicitudRepo.create({
+          idSolicitante: admin.id,
+          idDocenteEncargado: dto.idDocenteEncargado,
+          idLaboratorio: dto.idLaboratorio,
+          idTipo: dto.idTipo,
+          idEspacio: dto.idEspacio ?? null,
+          idFacultad: dto.idFacultad,
+          idPeriodo: dto.idPeriodo,
+          grupoAsignatura: dto.grupoAsignatura ?? null,
+          numGruposTrabajo: dto.numGruposTrabajo ?? null,
+          fechaPractica: dto.fechaPractica,
+          horaInicio: dto.horaInicio,
+          horaFin: dto.horaFin,
+          nombrePractica: dto.nombrePractica,
+          numPersonas: dto.numPersonas,
+          semana: dto.semana ?? null,
+          reactivosSustancias: dto.reactivosSustancias ?? null,
+          equiposInsumos: dto.equiposInsumos ?? null,
+          materialesEstudiante: dto.materialesEstudiante ?? null,
+          estado: EstadoSolicitud.APROBADA,
+        });
+        const guardada = await solicitudRepo.save(solicitud);
+
+        await firmaRepo.save(
+          firmaRepo.create({
+            idSolicitud: guardada.idSolicitud,
+            orden: 1,
+            rolFirmante: RolFirmante.DOCENTE,
+            idFirmante: admin.id,
+            resultado: ResultadoFirma.APROBADA,
+            fechaHora: ahora,
+          }),
+        );
+        await firmaRepo.save(
+          firmaRepo.create({
+            idSolicitud: guardada.idSolicitud,
+            orden: 2,
+            rolFirmante: RolFirmante.LABORATORISTA,
+            idFirmante: admin.id,
+            resultado: ResultadoFirma.APROBADA,
+            fechaHora: ahora,
+          }),
+        );
+
+        return guardada;
+      },
+    );
+
+    const docente = await this.usuarioRepository.findOne({
+      where: { idUsuario: dto.idDocenteEncargado },
+    });
+    const destinatarios = [
+      ...(docente ? [{ idUsuario: docente.idUsuario, correo: docente.correo }] : []),
+      ...(await this.todosLosLaboratoristas()),
+    ];
+    if (destinatarios.length > 0) {
+      await this.notificacionesService.notificar(
+        TipoEventoNotificacion.SOLICITUD_APROBADA,
+        solicitudCreada,
+        destinatarios,
+      );
+    }
+
+    return this.findOne(solicitudCreada.idSolicitud, admin);
   }
 
   // ───────────────────────── verbos de negocio ─────────────────────────
