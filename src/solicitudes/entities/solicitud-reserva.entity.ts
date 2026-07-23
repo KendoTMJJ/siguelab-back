@@ -35,12 +35,13 @@ export class SolicitudReserva {
   @JoinColumn({ name: 'id_solicitante' })
   solicitante!: Usuario;
 
-  @Column({ name: 'id_docente_encargado', type: 'uuid' })
-  idDocenteEncargado!: string;
+  /** Nula solo en reservas directas de admin sin docente asociado (ver SolicitudesService.crearDirecta). */
+  @Column({ name: 'id_docente_encargado', type: 'uuid', nullable: true })
+  idDocenteEncargado?: string | null;
 
-  @ManyToOne(() => Usuario)
+  @ManyToOne(() => Usuario, { nullable: true })
   @JoinColumn({ name: 'id_docente_encargado' })
-  docenteEncargado!: Usuario;
+  docenteEncargado?: Usuario | null;
 
   @Column({ name: 'id_laboratorio' })
   idLaboratorio!: number;

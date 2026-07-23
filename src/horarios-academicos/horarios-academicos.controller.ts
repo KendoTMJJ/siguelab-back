@@ -56,18 +56,32 @@ export class HorariosAcademicosController {
     required: false,
     enum: Object.values(DiaSemana),
   })
-  @ApiOperation({ summary: 'Listar horarios académicos vigentes' })
+  @ApiQuery({ name: 'incluirInactivos', required: false, type: Boolean })
+  @ApiQuery({
+    name: 'buscar',
+    required: false,
+    description:
+      'Filtra por espacio académico, laboratorio o grupo/asignatura (contiene, sin distinguir mayúsculas)',
+  })
+  @ApiOperation({
+    summary:
+      'Listar horarios académicos (por defecto solo vigentes; incluirInactivos=true trae también modificado/inactivo)',
+  })
   @ApiResponse({ status: 200, description: 'Listado de horarios académicos' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   findAll(
     @Query('idLaboratorio') idLaboratorio?: string,
     @Query('idPeriodo') idPeriodo?: string,
     @Query('diaSemana') diaSemana?: DiaSemana,
+    @Query('incluirInactivos') incluirInactivos?: string,
+    @Query('buscar') buscar?: string,
   ) {
     return this.horariosAcademicosService.findAll({
       idLaboratorio: idLaboratorio ? Number(idLaboratorio) : undefined,
       idPeriodo: idPeriodo ? Number(idPeriodo) : undefined,
       diaSemana,
+      incluirInactivos: incluirInactivos === 'true',
+      buscar,
     });
   }
 

@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, ILike, Repository } from 'typeorm';
 import { Division } from '../entities/division.entity';
 import { Facultad } from '../entities/facultad.entity';
 import { CreateFacultadDto } from '../dto/facultad/create-facultad.dto';
@@ -38,8 +38,11 @@ export class FacultadesService {
     }
   }
 
-  findAll(): Promise<Facultad[]> {
-    return this.facultadRepository.find({ order: { nombre: 'ASC' } });
+  findAll(buscar?: string): Promise<Facultad[]> {
+    return this.facultadRepository.find({
+      where: buscar ? { nombre: ILike(`%${buscar}%`) } : {},
+      order: { nombre: 'ASC' },
+    });
   }
 
   async findOne(id: number): Promise<Facultad> {

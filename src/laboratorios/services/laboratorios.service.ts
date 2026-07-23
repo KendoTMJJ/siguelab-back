@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, FindOptionsWhere, ILike, Repository } from 'typeorm';
 import { EstadoLaboratorio, Laboratorio } from '../entities/laboratorio.entity';
 import { CreateLaboratorioDto } from '../dto/laboratorio/create-laboratorio.dto';
 import { UpdateLaboratorioDto } from '../dto/laboratorio/update-laboratorio.dto';
@@ -7,6 +7,7 @@ import { UpdateLaboratorioDto } from '../dto/laboratorio/update-laboratorio.dto'
 export interface FiltrosLaboratorios {
   estado?: EstadoLaboratorio;
   incluirInactivos?: boolean;
+  buscar?: string;
 }
 
 @Injectable()
@@ -62,22 +63,24 @@ export class LaboratoriosService {
     const usaFiltrosAdmin =
       esAdmin && (!!filtros.estado || !!filtros.incluirInactivos);
 
-    let laboratorios: Laboratorio[];
-    if (!usaFiltrosAdmin) {
-      laboratorios = await this.laboratorioRepository.find({
-        where: { estado: EstadoLaboratorio.ACTIVO },
-        order: { nombre: 'ASC' },
-      });
-    } else if (filtros.incluirInactivos) {
-      laboratorios = await this.laboratorioRepository.find({
-        order: { nombre: 'ASC' },
-      });
-    } else {
-      laboratorios = await this.laboratorioRepository.find({
-        where: { estado: filtros.estado },
-        order: { nombre: 'ASC' },
-      });
-    }
+    const estadoBase: FindOptionsWhere<Laboratorio> = !usaFiltrosAdmin
+      ? { estado: EstadoLaboratorio.ACTIVO }
+      : filtros.incluirInactivos
+        ? {}
+        : { estado: filtros.estado };
+
+    const where: FindOptionsWhere<Laboratorio> | FindOptionsWhere<Laboratorio>[] =
+      filtros.buscar
+        ? [
+            { ...estadoBase, nombre: ILike(`%${filtros.buscar}%`) },
+            { ...estadoBase, ubicacion: ILike(`%${filtros.buscar}%`) },
+          ]
+        : estadoBase;
+
+    const laboratorios = await this.laboratorioRepository.find({
+      where,
+      order: { nombre: 'ASC' },
+    });
     return laboratorios.map((l) => this.limpiar(l));
   }
 
