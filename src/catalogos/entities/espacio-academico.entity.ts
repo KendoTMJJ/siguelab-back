@@ -12,14 +12,14 @@ export class EspacioAcademico {
   @PrimaryGeneratedColumn({ name: 'id_espacio' })
   idEspacio!: number;
 
-  @Column({ type: 'varchar', length: 20, nullable: true })
-  codigo?: string | null;
+  @Column({ length: 150 })
+  nombre!: string;
 
   /** Ver comentario equivalente en Division.nombreActivo. */
   @Column({
-    name: 'codigo_activo',
+    name: 'nombre_activo',
     type: 'varchar',
-    length: 20,
+    length: 150,
     nullable: true,
     unique: true,
     insert: false,
@@ -27,12 +27,9 @@ export class EspacioAcademico {
     select: false,
     generatedType: 'VIRTUAL',
     asExpression:
-      'CASE WHEN fecha_eliminacion IS NULL THEN codigo ELSE NULL END',
+      'CASE WHEN fecha_eliminacion IS NULL THEN nombre ELSE NULL END',
   })
-  codigoActivo?: string | null;
-
-  @Column({ length: 150 })
-  nombre!: string;
+  nombreActivo?: string | null;
 
   @CreateDateColumn({ name: 'fecha_creacion' })
   fechaCreacion!: Date;

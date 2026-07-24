@@ -40,6 +40,17 @@ export class CreateHorarioAcademicoDto {
   @MaxLength(20)
   grupoAsignatura?: string;
 
+  @ApiPropertyOptional({
+    example: 'QUI-101-01',
+    maxLength: 20,
+    description:
+      'Código formal de sección/grupo (distinto del código de la materia)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  codigo?: string;
+
   @ApiProperty({ example: 'lunes', enum: DIAS_SEMANA })
   @IsIn(DIAS_SEMANA)
   diaSemana!: DiaSemana;

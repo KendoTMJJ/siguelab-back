@@ -59,6 +59,11 @@ export class LaboratoriosController {
   @Get()
   @ApiQuery({ name: 'estado', required: false, enum: ['activo', 'inactivo'] })
   @ApiQuery({ name: 'incluirInactivos', required: false, type: Boolean })
+  @ApiQuery({
+    name: 'buscar',
+    required: false,
+    description: 'Filtra por nombre (contiene, sin distinguir mayúsculas)',
+  })
   @ApiOperation({
     summary:
       'Listar laboratorios (por defecto solo activos; filtros solo surten efecto para admin)',
@@ -69,9 +74,10 @@ export class LaboratoriosController {
     @CurrentUser() usuario: AuthenticatedUser,
     @Query('estado') estado?: EstadoLaboratorio,
     @Query('incluirInactivos') incluirInactivos?: string,
+    @Query('buscar') buscar?: string,
   ) {
     return this.laboratoriosService.findAll(
-      { estado, incluirInactivos: incluirInactivos === 'true' },
+      { estado, incluirInactivos: incluirInactivos === 'true', buscar },
       usuario.rol === 'admin',
     );
   }

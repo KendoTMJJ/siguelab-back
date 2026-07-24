@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, ILike, Repository } from 'typeorm';
 import { Division } from '../entities/division.entity';
 import { Facultad } from '../entities/facultad.entity';
 import { CreateDivisionDto } from '../dto/division/create-division.dto';
@@ -41,8 +41,11 @@ export class DivisionesService {
     }
   }
 
-  findAll(): Promise<Division[]> {
-    return this.divisionRepository.find({ order: { nombre: 'ASC' } });
+  findAll(buscar?: string): Promise<Division[]> {
+    return this.divisionRepository.find({
+      ...(buscar && { where: { nombre: ILike(`%${buscar}%`) } }),
+      order: { nombre: 'ASC' },
+    });
   }
 
   async findOne(id: number): Promise<Division> {

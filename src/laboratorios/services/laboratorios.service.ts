@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, ILike, Repository } from 'typeorm';
 import { EstadoLaboratorio, Laboratorio } from '../entities/laboratorio.entity';
 import { CreateLaboratorioDto } from '../dto/laboratorio/create-laboratorio.dto';
 import { UpdateLaboratorioDto } from '../dto/laboratorio/update-laboratorio.dto';
@@ -7,6 +7,7 @@ import { UpdateLaboratorioDto } from '../dto/laboratorio/update-laboratorio.dto'
 export interface FiltrosLaboratorios {
   estado?: EstadoLaboratorio;
   incluirInactivos?: boolean;
+  buscar?: string;
 }
 
 @Injectable()
@@ -61,20 +62,24 @@ export class LaboratoriosService {
   ): Promise<Laboratorio[]> {
     const usaFiltrosAdmin =
       esAdmin && (!!filtros.estado || !!filtros.incluirInactivos);
+    const filtroNombre = filtros.buscar
+      ? { nombre: ILike(`%${filtros.buscar}%`) }
+      : {};
 
     let laboratorios: Laboratorio[];
     if (!usaFiltrosAdmin) {
       laboratorios = await this.laboratorioRepository.find({
-        where: { estado: EstadoLaboratorio.ACTIVO },
+        where: { estado: EstadoLaboratorio.ACTIVO, ...filtroNombre },
         order: { nombre: 'ASC' },
       });
     } else if (filtros.incluirInactivos) {
       laboratorios = await this.laboratorioRepository.find({
+        where: { ...filtroNombre },
         order: { nombre: 'ASC' },
       });
     } else {
       laboratorios = await this.laboratorioRepository.find({
-        where: { estado: filtros.estado },
+        where: { estado: filtros.estado, ...filtroNombre },
         order: { nombre: 'ASC' },
       });
     }
