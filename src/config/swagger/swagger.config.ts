@@ -56,6 +56,10 @@ export function setupSwagger(app: INestApplication): void {
       'Bitácora',
       'Registro de uso real de los laboratorios (historia; no se borra)',
     )
+    .addTag(
+      'Estadísticas',
+      'Resumen agregado del sistema para admin y laboratorista (KPIs y datos para gráficos)',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

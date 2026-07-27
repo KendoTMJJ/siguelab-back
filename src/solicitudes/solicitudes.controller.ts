@@ -61,8 +61,7 @@ export class SolicitudesController {
   @Post('directa')
   @Roles('admin')
   @ApiOperation({
-    summary:
-      'Crear una solicitud ya aprobada, sin firmas (solo admin)',
+    summary: 'Crear una solicitud ya aprobada, sin firmas (solo admin)',
   })
   @ApiResponse({ status: 201, description: 'Solicitud creada y aprobada' })
   @ApiResponse({
@@ -109,7 +108,7 @@ export class SolicitudesController {
   }
 
   @Get()
-  @Roles('laboratorista', 'admin')
+  @Roles('docente', 'laboratorista', 'admin')
   @ApiQuery({
     name: 'estado',
     required: false,
@@ -117,21 +116,43 @@ export class SolicitudesController {
   })
   @ApiQuery({ name: 'idLaboratorio', required: false, type: Number })
   @ApiQuery({ name: 'idPeriodo', required: false, type: Number })
+  @ApiQuery({
+    name: 'nombreLaboratorio',
+    required: false,
+    description: 'Filtra por nombre del laboratorio (contiene)',
+  })
+  @ApiQuery({
+    name: 'nombreSolicitante',
+    required: false,
+    description: 'Filtra por nombre de quien creó la solicitud (contiene)',
+  })
+  @ApiQuery({ name: 'fechaDesde', required: false, type: String })
+  @ApiQuery({ name: 'fechaHasta', required: false, type: String })
   @ApiOperation({
-    summary: 'Listar todas las solicitudes (laboratorista/admin)',
+    summary:
+      'Historial de solicitudes (docente: las suyas como encargado; laboratorista/admin: todas)',
   })
   @ApiResponse({ status: 200, description: 'Listado de solicitudes' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Rol insuficiente' })
   findAll(
+    @CurrentUser() usuario: AuthenticatedUser,
     @Query('estado') estado?: EstadoSolicitud,
     @Query('idLaboratorio') idLaboratorio?: string,
     @Query('idPeriodo') idPeriodo?: string,
+    @Query('nombreLaboratorio') nombreLaboratorio?: string,
+    @Query('nombreSolicitante') nombreSolicitante?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
-    return this.solicitudesService.findAll({
+    return this.solicitudesService.findAll(usuario, {
       estado,
       idLaboratorio: idLaboratorio ? Number(idLaboratorio) : undefined,
       idPeriodo: idPeriodo ? Number(idPeriodo) : undefined,
+      nombreLaboratorio,
+      nombreSolicitante,
+      fechaDesde,
+      fechaHasta,
     });
   }
 

@@ -12,6 +12,7 @@ import { HorariosAcademicosModule } from './horarios-academicos/horarios-academi
 import { NotificacionesModule } from './notificaciones/notificaciones.module';
 import { SolicitudesModule } from './solicitudes/solicitudes.module';
 import { BitacoraModule } from './bitacora/bitacora.module';
+import { EstadisticasModule } from './estadisticas/estadisticas.module';
 import { JwtGuard } from './auth/jwt/jwt.guard';
 import { RolesGuard } from './auth/jwt/roles.guard';
 import { ThrottlerCustomGuard } from './auth/jwt/throttler-custom.guard';
@@ -37,6 +38,7 @@ import { ThrottlerCustomGuard } from './auth/jwt/throttler-custom.guard';
     NotificacionesModule,
     SolicitudesModule,
     BitacoraModule,
+    EstadisticasModule,
   ],
   controllers: [],
   providers: [
