@@ -45,8 +45,10 @@ describe('BitacoraService', () => {
   const queryBuilderMock = {
     orderBy: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
-    innerJoin: jest.fn().mockReturnThis(),
-    getMany: jest.fn().mockResolvedValue([]),
+    leftJoinAndSelect: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
+    getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
   };
 
   beforeEach(async () => {
@@ -170,13 +172,16 @@ describe('BitacoraService', () => {
   });
 
   describe('update', () => {
-    it('solo modifica novedad/observaciones', async () => {
+    it('modifica novedad/observaciones', async () => {
       const registroExistente: Partial<RegistroUso> = {
         idRegistro: 1,
         idLaboratorio: 1,
+        horaInicioReal: '08:00',
+        horaFinReal: '10:00',
         fecha: '2026-08-10',
         novedad: null,
         observaciones: null,
+        solicitud: null,
       };
       registroUsoRepository.findOne.mockResolvedValue(registroExistente);
 
@@ -193,6 +198,81 @@ describe('BitacoraService', () => {
       });
     });
 
+    it('también permite corregir laboratorio, tipo, fecha, horas y asistentes', async () => {
+      const registroExistente: Partial<RegistroUso> = {
+        idRegistro: 1,
+        idLaboratorio: 1,
+        idTipo: 1,
+        horaInicioReal: '08:00',
+        horaFinReal: '10:00',
+        fecha: '2026-08-10',
+        numAsistentes: 5,
+        solicitud: null,
+      };
+      registroUsoRepository.findOne.mockResolvedValue(registroExistente);
+      laboratorioRepository.findOne.mockResolvedValue({ idLaboratorio: 2 });
+      tipoReservaRepository.findOne.mockResolvedValue({ idTipo: 3 });
+
+      const actualizado = await service.update(1, {
+        idLaboratorio: 2,
+        idTipo: 3,
+        fecha: '2026-08-11',
+        horaInicioReal: '09:00',
+        horaFinReal: '11:00',
+        numAsistentes: 12,
+      });
+
+      expect(actualizado).toMatchObject({
+        idLaboratorio: 2,
+        idTipo: 3,
+        fecha: '2026-08-11',
+        horaInicioReal: '09:00',
+        horaFinReal: '11:00',
+        numAsistentes: 12,
+      });
+    });
+
+    it('lanza NOT_FOUND si el nuevo laboratorio no existe', async () => {
+      registroUsoRepository.findOne.mockResolvedValue({
+        idRegistro: 1,
+        horaInicioReal: '08:00',
+        horaFinReal: '10:00',
+        solicitud: null,
+      });
+      laboratorioRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.update(1, { idLaboratorio: 999 }),
+      ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
+    });
+
+    it('lanza BAD_REQUEST si el nuevo laboratorio no corresponde a la solicitud enlazada', async () => {
+      registroUsoRepository.findOne.mockResolvedValue({
+        idRegistro: 1,
+        horaInicioReal: '08:00',
+        horaFinReal: '10:00',
+        solicitud: { idSolicitud: 5, idLaboratorio: 1 },
+      });
+      laboratorioRepository.findOne.mockResolvedValue({ idLaboratorio: 2 });
+
+      await expect(
+        service.update(1, { idLaboratorio: 2 }),
+      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+    });
+
+    it('lanza BAD_REQUEST si la hora de fin resultante no es posterior a la de inicio', async () => {
+      registroUsoRepository.findOne.mockResolvedValue({
+        idRegistro: 1,
+        horaInicioReal: '08:00',
+        horaFinReal: '10:00',
+        solicitud: null,
+      });
+
+      await expect(
+        service.update(1, { horaInicioReal: '11:00' }),
+      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+    });
+
     it('lanza NOT_FOUND si el registro no existe', async () => {
       registroUsoRepository.findOne.mockResolvedValue(null);
 
@@ -202,10 +282,34 @@ describe('BitacoraService', () => {
     });
   });
 
+  describe('findOne', () => {
+    it('devuelve el registro con sus relaciones', async () => {
+      const registro = { idRegistro: 1 };
+      registroUsoRepository.findOne.mockResolvedValue(registro);
+
+      await expect(service.findOne(1)).resolves.toBe(registro);
+      expect(registroUsoRepository.findOne).toHaveBeenCalledWith({
+        where: { idRegistro: 1 },
+        relations: {
+          laboratorio: true,
+          tipoReserva: true,
+          laboratorista: true,
+          solicitud: true,
+        },
+      });
+    });
+
+    it('lanza NOT_FOUND si no existe', async () => {
+      registroUsoRepository.findOne.mockResolvedValue(null);
+
+      await expect(service.findOne(999)).rejects.toMatchObject({
+        status: HttpStatus.NOT_FOUND,
+      });
+    });
+  });
+
   describe('findAll', () => {
     it('aplica los filtros de laboratorio y rango de fechas', async () => {
-      queryBuilderMock.getMany.mockResolvedValue([]);
-
       await service.findAll({
         idLaboratorio: 1,
         fechaDesde: '2026-08-01',
@@ -224,21 +328,61 @@ describe('BitacoraService', () => {
         'registro.fecha <= :fechaHasta',
         { fechaHasta: '2026-08-31' },
       );
-      expect(queryBuilderMock.innerJoin).not.toHaveBeenCalled();
     });
 
-    it('filtra por periodo uniendo con la solicitud', async () => {
+    it('siempre resuelve laboratorio, tipoReserva, laboratorista y solicitud con join', async () => {
+      await service.findAll({});
+
+      expect(queryBuilderMock.leftJoinAndSelect).toHaveBeenCalledWith(
+        'registro.laboratorio',
+        'laboratorio',
+      );
+      expect(queryBuilderMock.leftJoinAndSelect).toHaveBeenCalledWith(
+        'registro.tipoReserva',
+        'tipoReserva',
+      );
+      expect(queryBuilderMock.leftJoinAndSelect).toHaveBeenCalledWith(
+        'registro.laboratorista',
+        'laboratorista',
+      );
+      expect(queryBuilderMock.leftJoinAndSelect).toHaveBeenCalledWith(
+        'registro.solicitud',
+        'solicitud',
+      );
+    });
+
+    it('filtra por periodo reusando el alias de la solicitud ya unida', async () => {
       await service.findAll({ idPeriodo: 3 });
 
-      expect(queryBuilderMock.innerJoin).toHaveBeenCalledWith(
-        'solicitud_reserva',
-        'solicitud',
-        'solicitud.id_solicitud = registro.id_solicitud',
-      );
       expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
         'solicitud.id_periodo = :idPeriodo',
         { idPeriodo: 3 },
       );
+    });
+
+    it('sin page/pageSize no aplica skip/take y devuelve pageSize = total', async () => {
+      queryBuilderMock.getManyAndCount.mockResolvedValueOnce([[{ idRegistro: 1 }], 1]);
+
+      const resultado = await service.findAll({});
+
+      expect(queryBuilderMock.skip).not.toHaveBeenCalled();
+      expect(queryBuilderMock.take).not.toHaveBeenCalled();
+      expect(resultado).toEqual({
+        items: [{ idRegistro: 1 }],
+        total: 1,
+        page: 1,
+        pageSize: 1,
+      });
+    });
+
+    it('con page/pageSize aplica skip/take y los devuelve en la respuesta', async () => {
+      queryBuilderMock.getManyAndCount.mockResolvedValueOnce([[], 42]);
+
+      const resultado = await service.findAll({ page: 2, pageSize: 20 });
+
+      expect(queryBuilderMock.skip).toHaveBeenCalledWith(20);
+      expect(queryBuilderMock.take).toHaveBeenCalledWith(20);
+      expect(resultado).toEqual({ items: [], total: 42, page: 2, pageSize: 20 });
     });
   });
 });

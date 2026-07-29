@@ -16,6 +16,16 @@ export interface FiltrosBitacora {
   fechaDesde?: string;
   fechaHasta?: string;
   idPeriodo?: number;
+  /** Si se omiten page/pageSize, se devuelven todas las filas (sin paginar) — ver findAll. */
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PaginaRegistroUso {
+  items: RegistroUso[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 @Injectable()
@@ -103,9 +113,18 @@ export class BitacoraService {
     return this.registroUsoRepository.save(registro);
   }
 
-  async findAll(filtros: FiltrosBitacora): Promise<RegistroUso[]> {
+  /**
+   * Sin `page`/`pageSize`: devuelve todo (compatibilidad con el cruce
+   * "pendientes por registrar" del front, que necesita el set completo de
+   * idSolicitud ya registrados, no una sola página). Con ambos: pagina.
+   */
+  async findAll(filtros: FiltrosBitacora): Promise<PaginaRegistroUso> {
     const query = this.registroUsoRepository
       .createQueryBuilder('registro')
+      .leftJoinAndSelect('registro.laboratorio', 'laboratorio')
+      .leftJoinAndSelect('registro.tipoReserva', 'tipoReserva')
+      .leftJoinAndSelect('registro.laboratorista', 'laboratorista')
+      .leftJoinAndSelect('registro.solicitud', 'solicitud')
       .orderBy('registro.fecha', 'DESC');
 
     if (filtros.idLaboratorio) {
@@ -124,23 +143,57 @@ export class BitacoraService {
       });
     }
     if (filtros.idPeriodo) {
-      query
-        .innerJoin(
-          'solicitud_reserva',
-          'solicitud',
-          'solicitud.id_solicitud = registro.id_solicitud',
-        )
-        .andWhere('solicitud.id_periodo = :idPeriodo', {
-          idPeriodo: filtros.idPeriodo,
-        });
+      // La solicitud ya está unida arriba (leftJoinAndSelect) — se reusa el
+      // mismo alias en vez de un innerJoin aparte.
+      query.andWhere('solicitud.id_periodo = :idPeriodo', {
+        idPeriodo: filtros.idPeriodo,
+      });
     }
 
-    return query.getMany();
+    if (filtros.page && filtros.pageSize) {
+      query.skip((filtros.page - 1) * filtros.pageSize).take(filtros.pageSize);
+    }
+
+    const [items, total] = await query.getManyAndCount();
+    return {
+      items,
+      total,
+      page: filtros.page ?? 1,
+      pageSize: filtros.pageSize ?? total,
+    };
   }
 
+  async findOne(id: number): Promise<RegistroUso> {
+    const registro = await this.registroUsoRepository.findOne({
+      where: { idRegistro: id },
+      relations: {
+        laboratorio: true,
+        tipoReserva: true,
+        laboratorista: true,
+        solicitud: true,
+      },
+    });
+    if (!registro) {
+      throw new HttpException(
+        'Registro de bitácora no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return registro;
+  }
+
+  /**
+   * Edición ampliada a propósito (ver UpdateRegistroUsoDto): el
+   * laboratorista puede corregir cualquier campo del registro, incluida
+   * fecha/horas/asistentes/laboratorio/tipo, no solo novedad/observaciones.
+   * `idSolicitud` no se puede reasignar; si el registro tiene una solicitud
+   * enlazada, `idLaboratorio` debe seguir coincidiendo con la de esa
+   * solicitud (misma regla que al crear).
+   */
   async update(id: number, dto: UpdateRegistroUsoDto): Promise<RegistroUso> {
     const registro = await this.registroUsoRepository.findOne({
       where: { idRegistro: id },
+      relations: { solicitud: true },
     });
     if (!registro) {
       throw new HttpException(
@@ -149,6 +202,62 @@ export class BitacoraService {
       );
     }
 
+    if (dto.idLaboratorio !== undefined) {
+      const laboratorio = await this.laboratorioRepository.findOne({
+        where: { idLaboratorio: dto.idLaboratorio },
+      });
+      if (!laboratorio) {
+        throw new HttpException(
+          'Laboratorio no encontrado',
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      if (
+        registro.solicitud &&
+        registro.solicitud.idLaboratorio !== dto.idLaboratorio
+      ) {
+        throw new HttpException(
+          'La solicitud enlazada no corresponde a este laboratorio',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      registro.idLaboratorio = dto.idLaboratorio;
+    }
+
+    if (dto.idTipo !== undefined) {
+      const tipoReserva = await this.tipoReservaRepository.findOne({
+        where: { idTipo: dto.idTipo },
+      });
+      if (!tipoReserva) {
+        throw new HttpException(
+          'Tipo de reserva no encontrado',
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      registro.idTipo = dto.idTipo;
+    }
+
+    const horaInicioFinal = dto.horaInicioReal ?? registro.horaInicioReal;
+    const horaFinFinal = dto.horaFinReal ?? registro.horaFinReal;
+    if (horaFinFinal <= horaInicioFinal) {
+      throw new HttpException(
+        'La hora de fin debe ser posterior a la hora de inicio',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (dto.fecha !== undefined) {
+      registro.fecha = dto.fecha;
+    }
+    if (dto.horaInicioReal !== undefined) {
+      registro.horaInicioReal = dto.horaInicioReal;
+    }
+    if (dto.horaFinReal !== undefined) {
+      registro.horaFinReal = dto.horaFinReal;
+    }
+    if (dto.numAsistentes !== undefined) {
+      registro.numAsistentes = dto.numAsistentes;
+    }
     if (dto.novedad !== undefined) {
       registro.novedad = dto.novedad;
     }

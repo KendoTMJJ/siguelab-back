@@ -1,6 +1,6 @@
 import { DataSource } from 'typeorm';
 import { Division } from '../entities/division.entity';
-import { Facultad } from '../entities/facultad.entity';
+import { Facultad, NivelFacultad } from '../entities/facultad.entity';
 import { TipoReserva } from '../entities/tipo-reserva.entity';
 import { PeriodoAcademico } from '../entities/periodo-academico.entity';
 
@@ -18,6 +18,20 @@ const TIPOS_RESERVA_BASE: Array<{
   },
   { nombre: 'Semillero', esExclusiva: false, requiereEspacio: false },
   { nombre: 'CAU', esExclusiva: false, requiereEspacio: false },
+  // Agregados para que el catálogo cubra las opciones cerradas de
+  // "Uso de Laboratorio" del export de asistencias (ver GAP-REPORT.md §4).
+  { nombre: 'Marketing', esExclusiva: false, requiereEspacio: false },
+  {
+    nombre: 'Servicios Externos',
+    esExclusiva: false,
+    requiereEspacio: false,
+  },
+  { nombre: 'Clase Cancelada', esExclusiva: false, requiereEspacio: false },
+  {
+    nombre: 'Prácticas Libres Canceladas',
+    esExclusiva: false,
+    requiereEspacio: false,
+  },
 ];
 
 const DIVISIONES_BASE = [
@@ -28,30 +42,83 @@ const DIVISIONES_BASE = [
   'Ciencias Jurídicas y Políticas',
 ];
 
-const FACULTADES_BASE: Array<{ division: string; nombre: string }> = [
-  { division: 'Arquitectura e Ingenierías', nombre: 'Ingeniería Electrónica' },
-  { division: 'Arquitectura e Ingenierías', nombre: 'Bioingeniería' },
-  { division: 'Arquitectura e Ingenierías', nombre: 'Ingeniería Mecánica' },
-  { division: 'Arquitectura e Ingenierías', nombre: 'Ingeniería Civil' },
-  { division: 'Arquitectura e Ingenierías', nombre: 'Arquitectura' },
-  { division: 'Arquitectura e Ingenierías', nombre: 'Diseño de Interacción' },
+const FACULTADES_BASE: Array<{
+  division: string;
+  nombre: string;
+  nivel: NivelFacultad;
+}> = [
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Ingeniería Electrónica',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Bioingeniería',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Ingeniería Mecánica',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Ingeniería Civil',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Arquitectura',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Diseño de Interacción',
+    nivel: NivelFacultad.PREGRADO,
+  },
   {
     division: 'Arquitectura e Ingenierías',
     nombre: 'Ing. de Datos e Inteligencia Artificial',
+    nivel: NivelFacultad.PREGRADO,
   },
-  { division: 'Ciencias de la Salud', nombre: 'Enfermería' },
-  { division: 'Ciencias Jurídicas y Políticas', nombre: 'Derecho' },
+  {
+    division: 'Ciencias de la Salud',
+    nombre: 'Enfermería',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  // Nombres tomados literalmente del prompt de export de asistencias — no
+  // inventados (ver GAP-REPORT.md §4, pregunta 5: el catálogo real de 48
+  // facultades queda pendiente de carga por un admin vía CRUD existente).
+  {
+    division: 'Ciencias de la Salud',
+    nombre: 'Cultura Física, Deporte y Recreación',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Ciencias de la Salud',
+    nombre: 'Maestría en Entrenamiento Deportivo y Actividad Física',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Derecho',
+    nivel: NivelFacultad.PREGRADO,
+  },
   {
     division: 'Ciencias Sociales y de la Educación',
     nombre: 'Doctorado en Pedagogía',
+    nivel: NivelFacultad.POSGRADO,
   },
   {
     division: 'Ciencias Económicas, Administrativas y Contables',
     nombre: 'Contaduría Pública',
+    nivel: NivelFacultad.PREGRADO,
   },
   {
     division: 'Ciencias Económicas, Administrativas y Contables',
     nombre: 'Administración de Empresas',
+    nivel: NivelFacultad.PREGRADO,
   },
 ];
 
@@ -112,6 +179,7 @@ async function seedFacultades(
         repo.create({
           nombre: dato.nombre,
           idDivision: divisiones[dato.division].idDivision,
+          nivel: dato.nivel,
         }),
       );
       console.log(`Facultad "${dato.nombre}" creada.`);

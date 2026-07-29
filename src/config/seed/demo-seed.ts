@@ -62,9 +62,9 @@ async function obtenerReferencias(dataSource: DataSource) {
     usuarioRepo.findOneByOrFail({ correo: 'd@usantoto.edu.co' }),
     usuarioRepo.findOneByOrFail({ correo: 'l@usantoto.edu.co' }),
   ]);
-  const [labCircuitos, labElectronica] = await Promise.all([
-    laboratorioRepo.findOneByOrFail({ nombre: 'Lab. Circuitos' }),
-    laboratorioRepo.findOneByOrFail({ nombre: 'Lab. Electrónica Digital' }),
+  const [labTelecomunicaciones, labAutomatizacion] = await Promise.all([
+    laboratorioRepo.findOneByOrFail({ nombre: 'Telecomunicaciones' }),
+    laboratorioRepo.findOneByOrFail({ nombre: 'Automatización y Control' }),
   ]);
   const [tipoDocencia, tipoPracticaLibre, tipoSemillero] = await Promise.all([
     tipoReservaRepo.findOneByOrFail({ nombre: 'Docencia' }),
@@ -80,8 +80,8 @@ async function obtenerReferencias(dataSource: DataSource) {
     estudiante,
     docente,
     laboratorista,
-    labCircuitos,
-    labElectronica,
+    labTelecomunicaciones,
+    labAutomatizacion,
     tipoDocencia,
     tipoPracticaLibre,
     tipoSemillero,
@@ -109,21 +109,21 @@ async function seedEspaciosYAsociaciones(
   await espacioLaboratorioRepo.save([
     espacioLaboratorioRepo.create({
       idEspacio: espacioCircuitos.idEspacio,
-      idLaboratorio: refs.labCircuitos.idLaboratorio,
+      idLaboratorio: refs.labTelecomunicaciones.idLaboratorio,
     }),
     espacioLaboratorioRepo.create({
       idEspacio: espacioElectronica.idEspacio,
-      idLaboratorio: refs.labElectronica.idLaboratorio,
+      idLaboratorio: refs.labAutomatizacion.idLaboratorio,
     }),
   ]);
   await docenteLaboratorioRepo.save([
     docenteLaboratorioRepo.create({
       idUsuario: refs.docente.idUsuario,
-      idLaboratorio: refs.labCircuitos.idLaboratorio,
+      idLaboratorio: refs.labTelecomunicaciones.idLaboratorio,
     }),
     docenteLaboratorioRepo.create({
       idUsuario: refs.docente.idUsuario,
-      idLaboratorio: refs.labElectronica.idLaboratorio,
+      idLaboratorio: refs.labAutomatizacion.idLaboratorio,
     }),
   ]);
   console.log(
@@ -142,7 +142,7 @@ async function seedHorarioAcademico(
 
   await horarioRepo.save(
     horarioRepo.create({
-      idLaboratorio: refs.labElectronica.idLaboratorio,
+      idLaboratorio: refs.labAutomatizacion.idLaboratorio,
       idEspacio: espacioElectronica.idEspacio,
       idDocente: refs.docente.idUsuario,
       idPeriodo: refs.periodo.idPeriodo,
@@ -181,7 +181,7 @@ async function seedSolicitudesYFirmas(
   const solicitudA = await solicitudRepo.save(
     solicitudRepo.create({
       ...base,
-      idLaboratorio: refs.labCircuitos.idLaboratorio,
+      idLaboratorio: refs.labTelecomunicaciones.idLaboratorio,
       idTipo: refs.tipoPracticaLibre.idTipo,
       fechaPractica: '2026-07-29',
       horaInicio: '10:00',
@@ -210,7 +210,7 @@ async function seedSolicitudesYFirmas(
   const solicitudB = await solicitudRepo.save(
     solicitudRepo.create({
       ...base,
-      idLaboratorio: refs.labCircuitos.idLaboratorio,
+      idLaboratorio: refs.labTelecomunicaciones.idLaboratorio,
       idTipo: refs.tipoSemillero.idTipo,
       fechaPractica: '2026-08-03',
       horaInicio: '14:00',
@@ -240,10 +240,15 @@ async function seedSolicitudesYFirmas(
   const solicitudC = await solicitudRepo.save(
     solicitudRepo.create({
       ...base,
-      idLaboratorio: refs.labCircuitos.idLaboratorio,
+      idLaboratorio: refs.labTelecomunicaciones.idLaboratorio,
       idTipo: refs.tipoPracticaLibre.idTipo,
       idEspacio: espacios.espacioCircuitos.idEspacio,
-      fechaPractica: '2026-07-15',
+      // Dentro del rango del periodo "2026-2" (fecha_inicio 2026-07-20, ver
+      // catalogos.seed.ts) — antes caía el 07-15, fuera de rango, y por eso
+      // el registro de bitácora ligado a esta solicitud quedaba invisible en
+      // /reportes/asistencias-laboratorios/exportar (filtra por fecha del
+      // periodo).
+      fechaPractica: '2026-07-22',
       horaInicio: '08:00',
       horaFin: '10:00',
       nombrePractica: '[Demo] Práctica de filtros activos',
@@ -257,7 +262,7 @@ async function seedSolicitudesYFirmas(
       rolFirmante: RolFirmante.DOCENTE,
       idFirmante: refs.docente.idUsuario,
       resultado: ResultadoFirma.APROBADA,
-      fechaHora: new Date('2026-07-10T09:00:00'),
+      fechaHora: new Date('2026-07-20T09:00:00'),
     }),
     firmaRepo.create({
       idSolicitud: solicitudC.idSolicitud,
@@ -265,7 +270,7 @@ async function seedSolicitudesYFirmas(
       rolFirmante: RolFirmante.LABORATORISTA,
       idFirmante: refs.laboratorista.idUsuario,
       resultado: ResultadoFirma.APROBADA,
-      fechaHora: new Date('2026-07-11T15:00:00'),
+      fechaHora: new Date('2026-07-21T15:00:00'),
     }),
   ]);
 
@@ -273,7 +278,7 @@ async function seedSolicitudesYFirmas(
   const solicitudD = await solicitudRepo.save(
     solicitudRepo.create({
       ...base,
-      idLaboratorio: refs.labElectronica.idLaboratorio,
+      idLaboratorio: refs.labAutomatizacion.idLaboratorio,
       idTipo: refs.tipoPracticaLibre.idTipo,
       fechaPractica: '2026-08-05',
       horaInicio: '10:00',
@@ -306,7 +311,7 @@ async function seedSolicitudesYFirmas(
   const solicitudE = await solicitudRepo.save(
     solicitudRepo.create({
       ...base,
-      idLaboratorio: refs.labCircuitos.idLaboratorio,
+      idLaboratorio: refs.labTelecomunicaciones.idLaboratorio,
       idTipo: refs.tipoPracticaLibre.idTipo,
       fechaPractica: '2026-08-10',
       horaInicio: '08:00',
@@ -332,7 +337,7 @@ async function seedSolicitudesYFirmas(
       idDocenteEncargado: refs.docente.idUsuario,
       idFacultad: refs.facultad.idFacultad,
       idPeriodo: refs.periodo.idPeriodo,
-      idLaboratorio: refs.labElectronica.idLaboratorio,
+      idLaboratorio: refs.labAutomatizacion.idLaboratorio,
       idTipo: refs.tipoDocencia.idTipo,
       idEspacio: espacios.espacioElectronica.idEspacio,
       fechaPractica: '2026-08-12',
@@ -369,20 +374,20 @@ async function seedBitacora(
   await registroUsoRepo.save([
     registroUsoRepo.create({
       idSolicitud: solicitudAprobada.idSolicitud,
-      idLaboratorio: refs.labCircuitos.idLaboratorio,
+      idLaboratorio: refs.labTelecomunicaciones.idLaboratorio,
       idLaboratorista: refs.laboratorista.idUsuario,
       idTipo: refs.tipoPracticaLibre.idTipo,
-      fecha: '2026-07-15',
+      fecha: '2026-07-22',
       horaInicioReal: '08:05',
       horaFinReal: '09:55',
       numAsistentes: 7,
       observaciones: '[Demo] Sesión sin novedad.',
     }),
     registroUsoRepo.create({
-      idLaboratorio: refs.labElectronica.idLaboratorio,
+      idLaboratorio: refs.labAutomatizacion.idLaboratorio,
       idLaboratorista: refs.laboratorista.idUsuario,
       idTipo: refs.tipoSemillero.idTipo,
-      fecha: '2026-07-10',
+      fecha: '2026-07-21',
       horaInicioReal: '15:00',
       horaFinReal: '17:00',
       numAsistentes: 5,

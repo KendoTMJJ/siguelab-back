@@ -60,6 +60,10 @@ export function setupSwagger(app: INestApplication): void {
       'Estadísticas',
       'Resumen agregado del sistema para admin y laboratorista (KPIs y datos para gráficos)',
     )
+    .addTag(
+      'Reportes',
+      'Exportaciones para sistemas externos (ej. Excel de asistencias en laboratorios para Power BI)',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
