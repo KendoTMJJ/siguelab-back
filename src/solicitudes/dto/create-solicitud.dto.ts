@@ -26,7 +26,10 @@ export class CreateSolicitudDto {
   @IsInt()
   idTipo!: number;
 
-  @ApiProperty({ example: 1, description: 'Espacio académico donde se realiza la práctica' })
+  @ApiProperty({
+    example: 1,
+    description: 'Espacio académico donde se realiza la práctica',
+  })
   @IsInt()
   idEspacio!: number;
 

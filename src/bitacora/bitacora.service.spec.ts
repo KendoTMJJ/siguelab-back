@@ -361,7 +361,10 @@ describe('BitacoraService', () => {
     });
 
     it('sin page/pageSize no aplica skip/take y devuelve pageSize = total', async () => {
-      queryBuilderMock.getManyAndCount.mockResolvedValueOnce([[{ idRegistro: 1 }], 1]);
+      queryBuilderMock.getManyAndCount.mockResolvedValueOnce([
+        [{ idRegistro: 1 }],
+        1,
+      ]);
 
       const resultado = await service.findAll({});
 
@@ -382,7 +385,12 @@ describe('BitacoraService', () => {
 
       expect(queryBuilderMock.skip).toHaveBeenCalledWith(20);
       expect(queryBuilderMock.take).toHaveBeenCalledWith(20);
-      expect(resultado).toEqual({ items: [], total: 42, page: 2, pageSize: 20 });
+      expect(resultado).toEqual({
+        items: [],
+        total: 42,
+        page: 2,
+        pageSize: 20,
+      });
     });
   });
 });

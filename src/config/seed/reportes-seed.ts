@@ -91,7 +91,9 @@ async function obtenerReferencias(dataSource: DataSource) {
 
   const tiposPorNombre = new Map(
     (
-      await tipoReservaRepo.find({ where: TIPOS_ROTACION.map((n) => ({ nombre: n })) })
+      await tipoReservaRepo.find({
+        where: TIPOS_ROTACION.map((n) => ({ nombre: n })),
+      })
     ).map((t) => [t.nombre, t]),
   );
 
