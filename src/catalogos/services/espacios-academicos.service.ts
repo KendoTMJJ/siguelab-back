@@ -12,31 +12,28 @@ export class EspaciosAcademicosService {
     this.espacioRepository = this.dataSource.getRepository(EspacioAcademico);
   }
 
-  private async existeActivoConCodigo(
-    codigo: string,
+  private async existeActivoConNombre(
+    nombre: string,
     idExcluido?: number,
   ): Promise<boolean> {
     const existente = await this.espacioRepository.findOne({
-      where: { codigo },
+      where: { nombre },
     });
     return !!existente && existente.idEspacio !== idExcluido;
   }
 
   /** Ver comentario equivalente en DivisionesService.limpiar. */
   private limpiar(espacio: EspacioAcademico): EspacioAcademico {
-    delete (espacio as Partial<EspacioAcademico>).codigoActivo;
+    delete (espacio as Partial<EspacioAcademico>).nombreActivo;
     return espacio;
   }
 
   async create(
     createEspacioAcademicoDto: CreateEspacioAcademicoDto,
   ): Promise<EspacioAcademico> {
-    if (
-      createEspacioAcademicoDto.codigo &&
-      (await this.existeActivoConCodigo(createEspacioAcademicoDto.codigo))
-    ) {
+    if (await this.existeActivoConNombre(createEspacioAcademicoDto.nombre)) {
       throw new HttpException(
-        'Ya existe un espacio académico con ese código',
+        'Ya existe un espacio académico con ese nombre',
         HttpStatus.CONFLICT,
       );
     }
@@ -55,10 +52,7 @@ export class EspaciosAcademicosService {
   async findAll(buscar?: string): Promise<EspacioAcademico[]> {
     const espacios = buscar
       ? await this.espacioRepository.find({
-          where: [
-            { nombre: ILike(`%${buscar}%`) },
-            { codigo: ILike(`%${buscar}%`) },
-          ],
+          where: { nombre: ILike(`%${buscar}%`) },
           order: { nombre: 'ASC' },
         })
       : await this.espacioRepository.find({ order: { nombre: 'ASC' } });
@@ -85,11 +79,11 @@ export class EspaciosAcademicosService {
     await this.findOne(id);
 
     if (
-      updateEspacioAcademicoDto.codigo &&
-      (await this.existeActivoConCodigo(updateEspacioAcademicoDto.codigo, id))
+      updateEspacioAcademicoDto.nombre &&
+      (await this.existeActivoConNombre(updateEspacioAcademicoDto.nombre, id))
     ) {
       throw new HttpException(
-        'Ya existe un espacio académico con ese código',
+        'Ya existe un espacio académico con ese nombre',
         HttpStatus.CONFLICT,
       );
     }
@@ -130,12 +124,9 @@ export class EspaciosAcademicosService {
         HttpStatus.CONFLICT,
       );
     }
-    if (
-      espacio.codigo &&
-      (await this.existeActivoConCodigo(espacio.codigo, id))
-    ) {
+    if (await this.existeActivoConNombre(espacio.nombre, id)) {
       throw new HttpException(
-        'Ya existe un espacio académico activo con ese código',
+        'Ya existe un espacio académico activo con ese nombre',
         HttpStatus.CONFLICT,
       );
     }

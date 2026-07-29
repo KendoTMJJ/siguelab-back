@@ -7,10 +7,12 @@ import {
   Param,
   Delete,
   ParseIntPipe,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -41,11 +43,16 @@ export class DivisionesController {
   }
 
   @Get()
+  @ApiQuery({
+    name: 'buscar',
+    required: false,
+    description: 'Filtra por nombre (contiene, sin distinguir mayúsculas)',
+  })
   @ApiOperation({ summary: 'Listar divisiones activas (orden alfabético)' })
   @ApiResponse({ status: 200, description: 'Listado de divisiones' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
-  findAll() {
-    return this.divisionesService.findAll();
+  findAll(@Query('buscar') buscar?: string) {
+    return this.divisionesService.findAll(buscar);
   }
 
   @Get(':id')

@@ -2,6 +2,7 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
 import { Laboratorio } from 'src/laboratorios/entities/laboratorio.entity';
 import { EspacioLaboratorio } from 'src/laboratorios/entities/espacio-laboratorio.entity';
+import { DocenteLaboratorio } from 'src/laboratorios/entities/docente-laboratorio.entity';
 import { EspacioAcademico } from 'src/catalogos/entities/espacio-academico.entity';
 import { PeriodoAcademico } from 'src/catalogos/entities/periodo-academico.entity';
 import { Usuario } from 'src/usuarios/entities/usuario.entity';
@@ -17,6 +18,7 @@ export interface FiltrosHorarios {
   idLaboratorio?: number;
   idPeriodo?: number;
   diaSemana?: DiaSemana;
+  buscar?: string;
 }
 
 @Injectable()
@@ -25,6 +27,7 @@ export class HorariosAcademicosService {
   private readonly laboratorioRepository: Repository<Laboratorio>;
   private readonly espacioAcademicoRepository: Repository<EspacioAcademico>;
   private readonly espacioLaboratorioRepository: Repository<EspacioLaboratorio>;
+  private readonly docenteLaboratorioRepository: Repository<DocenteLaboratorio>;
   private readonly periodoAcademicoRepository: Repository<PeriodoAcademico>;
   private readonly usuarioRepository: Repository<Usuario>;
 
@@ -35,6 +38,8 @@ export class HorariosAcademicosService {
       this.dataSource.getRepository(EspacioAcademico);
     this.espacioLaboratorioRepository =
       this.dataSource.getRepository(EspacioLaboratorio);
+    this.docenteLaboratorioRepository =
+      this.dataSource.getRepository(DocenteLaboratorio);
     this.periodoAcademicoRepository =
       this.dataSource.getRepository(PeriodoAcademico);
     this.usuarioRepository = this.dataSource.getRepository(Usuario);
@@ -127,6 +132,30 @@ export class HorariosAcademicosService {
     await this.espacioLaboratorioRepository.save(asociacion);
   }
 
+  /**
+   * Mismo motivo que asegurarAsociacionEspacioLaboratorio: SolicitudesService
+   * exige (id_docente_encargado, id_laboratorio) en docente_laboratorio (CTX-5)
+   * para que ese docente sea seleccionable como encargado. Sin esto, el
+   * docente de un horario académico recién creado no aparece en
+   * "docentes encargados" del laboratorio hasta que el admin lo asocia a mano.
+   */
+  private async asegurarAsociacionDocenteLaboratorio(
+    idLaboratorio: number,
+    idUsuario: string,
+  ): Promise<void> {
+    const existente = await this.docenteLaboratorioRepository.exists({
+      where: { idLaboratorio, idUsuario },
+    });
+    if (existente) {
+      return;
+    }
+    const asociacion = this.docenteLaboratorioRepository.create({
+      idLaboratorio,
+      idUsuario,
+    });
+    await this.docenteLaboratorioRepository.save(asociacion);
+  }
+
   async create(
     createHorarioAcademicoDto: CreateHorarioAcademicoDto,
   ): Promise<HorarioAcademico> {
@@ -146,6 +175,12 @@ export class HorariosAcademicosService {
       createHorarioAcademicoDto.idLaboratorio,
       createHorarioAcademicoDto.idEspacio,
     );
+    if (createHorarioAcademicoDto.idDocente) {
+      await this.asegurarAsociacionDocenteLaboratorio(
+        createHorarioAcademicoDto.idLaboratorio,
+        createHorarioAcademicoDto.idDocente,
+      );
+    }
 
     try {
       const horario = this.horarioRepository.create(createHorarioAcademicoDto);
@@ -159,17 +194,39 @@ export class HorariosAcademicosService {
   }
 
   findAll(filtros: FiltrosHorarios): Promise<HorarioAcademico[]> {
-    return this.horarioRepository.find({
-      where: {
-        estado: EstadoHorario.VIGENTE,
-        ...(filtros.idLaboratorio && {
-          idLaboratorio: filtros.idLaboratorio,
-        }),
-        ...(filtros.idPeriodo && { idPeriodo: filtros.idPeriodo }),
-        ...(filtros.diaSemana && { diaSemana: filtros.diaSemana }),
-      },
-      order: { diaSemana: 'ASC', horaInicio: 'ASC' },
-    });
+    const query = this.horarioRepository
+      .createQueryBuilder('horario')
+      .leftJoinAndSelect('horario.laboratorio', 'laboratorio')
+      .leftJoinAndSelect('horario.espacioAcademico', 'espacioAcademico')
+      .where('horario.estado = :estado', { estado: EstadoHorario.VIGENTE });
+
+    if (filtros.idLaboratorio) {
+      query.andWhere('horario.id_laboratorio = :idLaboratorio', {
+        idLaboratorio: filtros.idLaboratorio,
+      });
+    }
+    if (filtros.idPeriodo) {
+      query.andWhere('horario.id_periodo = :idPeriodo', {
+        idPeriodo: filtros.idPeriodo,
+      });
+    }
+    if (filtros.diaSemana) {
+      query.andWhere('horario.dia_semana = :diaSemana', {
+        diaSemana: filtros.diaSemana,
+      });
+    }
+    if (filtros.buscar) {
+      query.andWhere(
+        '(espacioAcademico.nombre LIKE :buscar OR laboratorio.nombre LIKE :buscar ' +
+          'OR horario.grupo_asignatura LIKE :buscar OR horario.codigo LIKE :buscar)',
+        { buscar: `%${filtros.buscar}%` },
+      );
+    }
+
+    return query
+      .orderBy('horario.dia_semana', 'ASC')
+      .addOrderBy('horario.hora_inicio', 'ASC')
+      .getMany();
   }
 
   async findOne(id: number): Promise<HorarioAcademico> {
@@ -214,10 +271,25 @@ export class HorariosAcademicosService {
       await this.validarDocente(updateHorarioAcademicoDto.idDocente);
     }
 
-    if (updateHorarioAcademicoDto.idLaboratorio || updateHorarioAcademicoDto.idEspacio) {
+    if (
+      updateHorarioAcademicoDto.idLaboratorio ||
+      updateHorarioAcademicoDto.idEspacio
+    ) {
       await this.asegurarAsociacionEspacioLaboratorio(
         updateHorarioAcademicoDto.idLaboratorio ?? actual.idLaboratorio,
         updateHorarioAcademicoDto.idEspacio ?? actual.idEspacio,
+      );
+    }
+    const idDocenteResultante =
+      updateHorarioAcademicoDto.idDocente ?? actual.idDocente;
+    if (
+      idDocenteResultante &&
+      (updateHorarioAcademicoDto.idLaboratorio ||
+        updateHorarioAcademicoDto.idDocente)
+    ) {
+      await this.asegurarAsociacionDocenteLaboratorio(
+        updateHorarioAcademicoDto.idLaboratorio ?? actual.idLaboratorio,
+        idDocenteResultante,
       );
     }
 

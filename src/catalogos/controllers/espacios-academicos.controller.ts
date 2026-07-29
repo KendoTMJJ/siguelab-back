@@ -38,7 +38,7 @@ export class EspaciosAcademicosController {
   @ApiResponse({ status: 403, description: 'Rol insuficiente' })
   @ApiResponse({
     status: 409,
-    description: 'Ya existe un espacio con ese código',
+    description: 'Ya existe un espacio con ese nombre',
   })
   create(@Body() createEspacioAcademicoDto: CreateEspacioAcademicoDto) {
     return this.espaciosAcademicosService.create(createEspacioAcademicoDto);
@@ -48,8 +48,7 @@ export class EspaciosAcademicosController {
   @ApiQuery({
     name: 'buscar',
     required: false,
-    description:
-      'Filtra por nombre o código (contiene, sin distinguir mayúsculas)',
+    description: 'Filtra por nombre (contiene, sin distinguir mayúsculas)',
   })
   @ApiOperation({ summary: 'Listar espacios académicos activos' })
   @ApiResponse({ status: 200, description: 'Listado de espacios académicos' })
@@ -77,7 +76,7 @@ export class EspaciosAcademicosController {
   @ApiResponse({ status: 404, description: 'Espacio académico no encontrado' })
   @ApiResponse({
     status: 409,
-    description: 'Ya existe un espacio con ese código',
+    description: 'Ya existe un espacio con ese nombre',
   })
   update(
     @Param('id', ParseIntPipe) id: number,

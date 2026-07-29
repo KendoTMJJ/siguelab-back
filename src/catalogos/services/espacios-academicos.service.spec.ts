@@ -18,7 +18,6 @@ describe('EspaciosAcademicosService', () => {
 
   const espacioBase: EspacioAcademico = {
     idEspacio: 1,
-    codigo: 'ELEC-204',
     nombre: 'Electrónica Digital II',
     fechaCreacion: new Date(),
     fechaActualizacion: new Date(),
@@ -59,46 +58,45 @@ describe('EspaciosAcademicosService', () => {
       });
     });
 
-    it('con `buscar` filtra por nombre O código (case-insensitive)', async () => {
+    it('con `buscar` filtra por nombre (case-insensitive)', async () => {
       repository.find.mockResolvedValue([espacioBase]);
 
       const resultado = await service.findAll('electr');
 
       expect(repository.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.arrayContaining([
-            expect.objectContaining({ nombre: expect.anything() }),
-            expect.objectContaining({ codigo: expect.anything() }),
-          ]),
+          where: expect.objectContaining({ nombre: expect.anything() }),
         }),
       );
       expect(resultado).toHaveLength(1);
     });
 
-    it('no expone el campo interno codigoActivo', async () => {
+    it('no expone el campo interno nombreActivo', async () => {
       repository.find.mockResolvedValue([
-        { ...espacioBase, codigoActivo: 'ELEC-204' },
+        { ...espacioBase, nombreActivo: 'Electrónica Digital II' },
       ]);
 
       const [espacio] = await service.findAll();
 
-      expect(espacio).not.toHaveProperty('codigoActivo');
+      expect(espacio).not.toHaveProperty('nombreActivo');
     });
   });
 
   describe('create', () => {
-    it('lanza CONFLICT si el código ya está activo en otro espacio', async () => {
+    it('lanza CONFLICT si el nombre ya está activo en otro espacio', async () => {
       repository.findOne.mockResolvedValue(espacioBase);
 
       await expect(
-        service.create({ nombre: 'Otro nombre', codigo: 'ELEC-204' }),
+        service.create({ nombre: 'Electrónica Digital II' }),
       ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
     });
 
-    it('permite crear sin código (nullable)', async () => {
-      const espacio = await service.create({ nombre: 'Sin código' });
+    it('crea un espacio con nombre único', async () => {
+      repository.findOne.mockResolvedValue(null);
 
-      expect(espacio.nombre).toBe('Sin código');
+      const espacio = await service.create({ nombre: 'Química' });
+
+      expect(espacio.nombre).toBe('Química');
     });
   });
 });

@@ -26,13 +26,12 @@ export class CreateSolicitudDto {
   @IsInt()
   idTipo!: number;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: 1,
-    description: 'Obligatorio solo si el tipo de reserva lo exige',
+    description: 'Espacio académico donde se realiza la práctica',
   })
-  @IsOptional()
   @IsInt()
-  idEspacio?: number;
+  idEspacio!: number;
 
   @ApiProperty({
     example: 1,

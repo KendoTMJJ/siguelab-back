@@ -47,3 +47,60 @@ export async function seedAdmin(dataSource: DataSource): Promise<void> {
   await usuarioRepository.save(usuario);
   console.log('Admin creado correctamente.');
 }
+
+interface UsuarioDemo {
+  nombre: string;
+  correo: string;
+  contrasena: string;
+  rol: string;
+}
+
+/** Solo para desarrollo/pruebas: un usuario por cada rol no-admin. */
+const USUARIOS_DEMO: UsuarioDemo[] = [
+  {
+    nombre: 'Estudiante',
+    correo: 'e@usantoto.edu.co',
+    contrasena: '12345678',
+    rol: 'estudiante',
+  },
+  {
+    nombre: 'Docente',
+    correo: 'd@usantoto.edu.co',
+    contrasena: '12345678',
+    rol: 'docente',
+  },
+  {
+    nombre: 'Laboratorista',
+    correo: 'l@usantoto.edu.co',
+    contrasena: '12345678',
+    rol: 'laboratorista',
+  },
+];
+
+export async function seedUsuariosDemo(dataSource: DataSource): Promise<void> {
+  const rolRepository = dataSource.getRepository(Rol);
+  const usuarioRepository = dataSource.getRepository(Usuario);
+
+  const roles = await seedRoles(rolRepository);
+
+  for (const demo of USUARIOS_DEMO) {
+    const existente = await usuarioRepository.findOne({
+      where: { correo: demo.correo },
+    });
+    if (existente) {
+      continue;
+    }
+
+    const usuario = usuarioRepository.create({
+      nombre: demo.nombre,
+      correo: demo.correo,
+      contrasena: await bcrypt.hash(demo.contrasena, 10),
+      estado: EstadoUsuario.ACTIVO,
+      correoVerificado: true,
+      rol: roles[demo.rol],
+    });
+
+    await usuarioRepository.save(usuario);
+    console.log(`Usuario demo (${demo.rol}) creado: ${demo.correo}`);
+  }
+}

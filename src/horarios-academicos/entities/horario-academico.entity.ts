@@ -74,6 +74,14 @@ export class HorarioAcademico {
   })
   grupoAsignatura?: string | null;
 
+  /**
+   * Código formal de sección/grupo (viene del Excel fuente). Distinto de
+   * grupoAsignatura (etiqueta libre tipo "G1"): un mismo grupo puede tener
+   * un código de sección propio. Sin unicidad, igual que grupoAsignatura.
+   */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  codigo?: string | null;
+
   @Column({ name: 'dia_semana', type: 'enum', enum: DiaSemana })
   diaSemana!: DiaSemana;
 

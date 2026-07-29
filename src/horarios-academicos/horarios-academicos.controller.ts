@@ -56,6 +56,12 @@ export class HorariosAcademicosController {
     required: false,
     enum: Object.values(DiaSemana),
   })
+  @ApiQuery({
+    name: 'buscar',
+    required: false,
+    description:
+      'Filtra por espacio académico, laboratorio, grupo o código (contiene, sin distinguir mayúsculas)',
+  })
   @ApiOperation({ summary: 'Listar horarios académicos vigentes' })
   @ApiResponse({ status: 200, description: 'Listado de horarios académicos' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
@@ -63,11 +69,13 @@ export class HorariosAcademicosController {
     @Query('idLaboratorio') idLaboratorio?: string,
     @Query('idPeriodo') idPeriodo?: string,
     @Query('diaSemana') diaSemana?: DiaSemana,
+    @Query('buscar') buscar?: string,
   ) {
     return this.horariosAcademicosService.findAll({
       idLaboratorio: idLaboratorio ? Number(idLaboratorio) : undefined,
       idPeriodo: idPeriodo ? Number(idPeriodo) : undefined,
       diaSemana,
+      buscar,
     });
   }
 

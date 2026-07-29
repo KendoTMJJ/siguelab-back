@@ -56,8 +56,19 @@ export class BitacoraController {
   @ApiQuery({ name: 'fechaDesde', required: false, type: String })
   @ApiQuery({ name: 'fechaHasta', required: false, type: String })
   @ApiQuery({ name: 'idPeriodo', required: false, type: Number })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description:
+      'Si se omite (junto con pageSize), devuelve todas las filas sin paginar.',
+  })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
   @ApiOperation({ summary: 'Listar la bitácora de uso' })
-  @ApiResponse({ status: 200, description: 'Listado de registros de bitácora' })
+  @ApiResponse({
+    status: 200,
+    description: '{ items, total, page, pageSize }',
+  })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Rol insuficiente' })
   findAll(
@@ -65,29 +76,48 @@ export class BitacoraController {
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
     @Query('idPeriodo') idPeriodo?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
     return this.bitacoraService.findAll({
       idLaboratorio: idLaboratorio ? Number(idLaboratorio) : undefined,
       fechaDesde,
       fechaHasta,
       idPeriodo: idPeriodo ? Number(idPeriodo) : undefined,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
     });
+  }
+
+  @Get(':id')
+  @Roles('laboratorista', 'admin')
+  @ApiOperation({ summary: 'Ver el detalle de un registro de bitácora' })
+  @ApiResponse({ status: 200, description: 'Registro encontrado' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Rol insuficiente' })
+  @ApiResponse({ status: 404, description: 'Registro no encontrado' })
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.bitacoraService.findOne(id);
   }
 
   @Patch(':id')
   @Roles('laboratorista')
   @ApiOperation({
     summary:
-      'Actualizar novedad/observaciones de un registro (whitelist estricta; sin DELETE)',
+      'Corregir un registro de bitácora ya creado (todos los campos, edición parcial)',
   })
   @ApiResponse({ status: 200, description: 'Registro actualizado' })
   @ApiResponse({
     status: 400,
-    description: 'Campo no permitido (solo novedad/observaciones)',
+    description:
+      'Datos inválidos (ej. hora_fin_real <= hora_inicio_real, o laboratorio distinto al de la solicitud enlazada)',
   })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Rol insuficiente' })
-  @ApiResponse({ status: 404, description: 'Registro no encontrado' })
+  @ApiResponse({
+    status: 404,
+    description: 'Registro, laboratorio o tipo de reserva no encontrados',
+  })
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateRegistroUsoDto: UpdateRegistroUsoDto,

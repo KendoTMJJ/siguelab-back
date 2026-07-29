@@ -44,6 +44,10 @@ export interface FiltrosSolicitudes {
   estado?: EstadoSolicitud;
   idLaboratorio?: number;
   idPeriodo?: number;
+  nombreLaboratorio?: string;
+  nombreSolicitante?: string;
+  fechaDesde?: string;
+  fechaHasta?: string;
 }
 
 export interface BloqueDisponibilidad {
@@ -55,6 +59,8 @@ export interface BloqueDisponibilidad {
   nombrePractica?: string;
   cuposOcupados?: number;
   capacidad?: number;
+  /** Solo origen 'horario_academico': materia + grupo/código de esa clase. */
+  nombreEspacio?: string;
 }
 
 @Injectable()
@@ -222,7 +228,11 @@ export class SolicitudesService {
     if (params.esExclusiva) {
       return {
         disponible: false,
-        motivo: 'Ya existe una reserva aprobada que cruza en ese horario',
+        motivo:
+          'Este tipo de reserva es exclusivo (como Docencia) y exige el laboratorio ' +
+          'completamente libre en ese horario, sin compartir aforo con otras reservas. ' +
+          'Ya existe una reserva aprobada que cruza este horario — elige otro horario ' +
+          'o laboratorio',
       };
     }
 
@@ -233,7 +243,9 @@ export class SolicitudesService {
       return {
         disponible: false,
         motivo:
-          'Ya existe una reserva exclusiva aprobada que cruza en ese horario',
+          'Ya existe una reserva exclusiva aprobada (como Docencia) que cruza este ' +
+          'horario — ese tipo bloquea el laboratorio completo, sin dejar aforo ' +
+          'compartido disponible',
       };
     }
 
@@ -304,33 +316,24 @@ export class SolicitudesService {
       );
     }
 
-    if (tipoReserva.requiereEspacio && !dto.idEspacio) {
+    const espacio = await this.espacioAcademicoRepository.findOne({
+      where: { idEspacio: dto.idEspacio },
+    });
+    if (!espacio) {
       throw new HttpException(
-        'Este tipo de reserva exige elegir un espacio académico',
-        HttpStatus.BAD_REQUEST,
+        'Espacio académico no encontrado',
+        HttpStatus.NOT_FOUND,
       );
     }
 
-    if (dto.idEspacio) {
-      const espacio = await this.espacioAcademicoRepository.findOne({
-        where: { idEspacio: dto.idEspacio },
-      });
-      if (!espacio) {
-        throw new HttpException(
-          'Espacio académico no encontrado',
-          HttpStatus.NOT_FOUND,
-        );
-      }
-
-      const espacioAsociado = await this.espacioLaboratorioRepository.exists({
-        where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
-      });
-      if (!espacioAsociado) {
-        throw new HttpException(
-          'El laboratorio elegido no está asociado a ese espacio académico',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+    const espacioAsociado = await this.espacioLaboratorioRepository.exists({
+      where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
+    });
+    if (!espacioAsociado) {
+      throw new HttpException(
+        'El laboratorio elegido no está asociado a ese espacio académico',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const docenteAsociado = await this.docenteLaboratorioRepository.exists({
@@ -547,33 +550,24 @@ export class SolicitudesService {
       );
     }
 
-    if (tipoReserva.requiereEspacio && !dto.idEspacio) {
+    const espacio = await this.espacioAcademicoRepository.findOne({
+      where: { idEspacio: dto.idEspacio },
+    });
+    if (!espacio) {
       throw new HttpException(
-        'Este tipo de reserva exige elegir un espacio académico',
-        HttpStatus.BAD_REQUEST,
+        'Espacio académico no encontrado',
+        HttpStatus.NOT_FOUND,
       );
     }
 
-    if (dto.idEspacio) {
-      const espacio = await this.espacioAcademicoRepository.findOne({
-        where: { idEspacio: dto.idEspacio },
-      });
-      if (!espacio) {
-        throw new HttpException(
-          'Espacio académico no encontrado',
-          HttpStatus.NOT_FOUND,
-        );
-      }
-
-      const espacioAsociado = await this.espacioLaboratorioRepository.exists({
-        where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
-      });
-      if (!espacioAsociado) {
-        throw new HttpException(
-          'El laboratorio elegido no está asociado a ese espacio académico',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+    const espacioAsociado = await this.espacioLaboratorioRepository.exists({
+      where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
+    });
+    if (!espacioAsociado) {
+      throw new HttpException(
+        'El laboratorio elegido no está asociado a ese espacio académico',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const docenteAsociado = await this.docenteLaboratorioRepository.exists({
@@ -737,7 +731,9 @@ export class SolicitudesService {
       where: { idUsuario: dto.idDocenteEncargado },
     });
     const destinatarios = [
-      ...(docente ? [{ idUsuario: docente.idUsuario, correo: docente.correo }] : []),
+      ...(docente
+        ? [{ idUsuario: docente.idUsuario, correo: docente.correo }]
+        : []),
       ...(await this.todosLosLaboratoristas()),
     ];
     if (destinatarios.length > 0) {
@@ -1152,16 +1148,79 @@ export class SolicitudesService {
     return solicitud;
   }
 
-  async findAll(filtros: FiltrosSolicitudes): Promise<SolicitudReserva[]> {
-    return this.solicitudRepository.find({
-      where: {
-        ...(filtros.estado && { estado: filtros.estado }),
-        ...(filtros.idLaboratorio && { idLaboratorio: filtros.idLaboratorio }),
-        ...(filtros.idPeriodo && { idPeriodo: filtros.idPeriodo }),
-      },
-      relations: { firmas: true },
-      order: { fechaCreacion: 'DESC' },
-    });
+  /**
+   * Docente: solo las solicitudes donde es el encargado (cualquier estado) —
+   * es su "historial" (a diferencia de /pendientes-de-mi-firma, que solo
+   * muestra las que aún esperan su firma). Laboratorista/admin: todas, igual
+   * que la bandeja compartida de firmas.
+   */
+  async findAll(
+    usuario: AuthenticatedUser,
+    filtros: FiltrosSolicitudes,
+  ): Promise<SolicitudReserva[]> {
+    const query = this.solicitudRepository
+      .createQueryBuilder('solicitud')
+      .leftJoinAndSelect('solicitud.firmas', 'firmas')
+      .leftJoinAndSelect('solicitud.laboratorio', 'laboratorio')
+      .leftJoinAndSelect('solicitud.tipoReserva', 'tipoReserva')
+      .leftJoinAndSelect('solicitud.espacioAcademico', 'espacioAcademico')
+      .leftJoin('solicitud.solicitante', 'solicitante')
+      .addSelect([
+        'solicitante.idUsuario',
+        'solicitante.nombre',
+        'solicitante.correo',
+      ])
+      .leftJoin('solicitud.docenteEncargado', 'docenteEncargado')
+      .addSelect([
+        'docenteEncargado.idUsuario',
+        'docenteEncargado.nombre',
+        'docenteEncargado.correo',
+      ])
+      .orderBy('solicitud.fecha_practica', 'DESC');
+
+    if (usuario.rol === 'docente') {
+      query.andWhere('solicitud.id_docente_encargado = :idDocente', {
+        idDocente: usuario.id,
+      });
+    }
+
+    if (filtros.estado) {
+      query.andWhere('solicitud.estado = :estado', {
+        estado: filtros.estado,
+      });
+    }
+    if (filtros.idLaboratorio) {
+      query.andWhere('solicitud.id_laboratorio = :idLaboratorio', {
+        idLaboratorio: filtros.idLaboratorio,
+      });
+    }
+    if (filtros.idPeriodo) {
+      query.andWhere('solicitud.id_periodo = :idPeriodo', {
+        idPeriodo: filtros.idPeriodo,
+      });
+    }
+    if (filtros.nombreLaboratorio) {
+      query.andWhere('laboratorio.nombre LIKE :nombreLaboratorio', {
+        nombreLaboratorio: `%${filtros.nombreLaboratorio}%`,
+      });
+    }
+    if (filtros.nombreSolicitante) {
+      query.andWhere('solicitante.nombre LIKE :nombreSolicitante', {
+        nombreSolicitante: `%${filtros.nombreSolicitante}%`,
+      });
+    }
+    if (filtros.fechaDesde) {
+      query.andWhere('solicitud.fecha_practica >= :fechaDesde', {
+        fechaDesde: filtros.fechaDesde,
+      });
+    }
+    if (filtros.fechaHasta) {
+      query.andWhere('solicitud.fecha_practica <= :fechaHasta', {
+        fechaHasta: filtros.fechaHasta,
+      });
+    }
+
+    return query.getMany();
   }
 
   async disponibilidad(
@@ -1186,6 +1245,7 @@ export class SolicitudesService {
         'periodo',
         'periodo.id_periodo = horario.id_periodo',
       )
+      .leftJoinAndSelect('horario.espacioAcademico', 'espacioAcademico')
       .where('horario.id_laboratorio = :idLaboratorio', { idLaboratorio })
       .andWhere('horario.dia_semana = :diaSemana', { diaSemana })
       .andWhere('horario.estado = :estado', { estado: EstadoHorario.VIGENTE })
@@ -1198,6 +1258,14 @@ export class SolicitudesService {
       horaInicio: h.horaInicio,
       horaFin: h.horaFin,
       esExclusiva: true,
+      nombreEspacio: [
+        h.espacioAcademico?.nombre,
+        h.grupoAsignatura && `- ${h.grupoAsignatura}`,
+        h.codigo && `(${h.codigo})`,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .trim(),
     }));
 
     const solicitudes = await this.solicitudRepository.find({

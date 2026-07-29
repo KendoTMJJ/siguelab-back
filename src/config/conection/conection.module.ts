@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { seedAdmin } from '../seed/seed';
+import { seedAdmin, seedUsuariosDemo } from '../seed/seed';
 import { seedCatalogos } from '../../catalogos/seed/catalogos.seed';
 import { seedLaboratorios } from '../../laboratorios/seed/laboratorios.seed';
 
@@ -29,6 +29,7 @@ import { seedLaboratorios } from '../../laboratorios/seed/laboratorios.seed';
           await poolConection.initialize();
           console.log('Base de datos conectada correctamente');
           await seedAdmin(poolConection);
+          await seedUsuariosDemo(poolConection);
           await seedCatalogos(poolConection);
           await seedLaboratorios(poolConection);
           return poolConection;
