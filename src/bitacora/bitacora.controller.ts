@@ -21,6 +21,7 @@ import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorat
 import { BitacoraService } from './bitacora.service';
 import { CreateRegistroUsoDto } from './dto/create-registro-uso.dto';
 import { UpdateRegistroUsoDto } from './dto/update-registro-uso.dto';
+import { resolvePagination } from 'src/common/pagination/pagination.util';
 
 @ApiTags('Bitácora')
 @ApiBearerAuth()
@@ -56,18 +57,17 @@ export class BitacoraController {
   @ApiQuery({ name: 'fechaDesde', required: false, type: String })
   @ApiQuery({ name: 'fechaHasta', required: false, type: String })
   @ApiQuery({ name: 'idPeriodo', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({
-    name: 'page',
+    name: 'limit',
     required: false,
     type: Number,
-    description:
-      'Si se omite (junto con pageSize), devuelve todas las filas sin paginar.',
+    description: 'Máx. 100, por defecto 20',
   })
-  @ApiQuery({ name: 'pageSize', required: false, type: Number })
-  @ApiOperation({ summary: 'Listar la bitácora de uso' })
+  @ApiOperation({ summary: 'Listar la bitácora de uso (paginado)' })
   @ApiResponse({
     status: 200,
-    description: '{ items, total, page, pageSize }',
+    description: '{ data, meta: { total, page, limit, totalPages } }',
   })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Rol insuficiente' })
@@ -77,16 +77,42 @@ export class BitacoraController {
     @Query('fechaHasta') fechaHasta?: string,
     @Query('idPeriodo') idPeriodo?: string,
     @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.bitacoraService.findAll({
-      idLaboratorio: idLaboratorio ? Number(idLaboratorio) : undefined,
-      fechaDesde,
-      fechaHasta,
-      idPeriodo: idPeriodo ? Number(idPeriodo) : undefined,
-      page: page ? Number(page) : undefined,
-      pageSize: pageSize ? Number(pageSize) : undefined,
-    });
+    return this.bitacoraService.findAll(
+      {
+        idLaboratorio: idLaboratorio ? Number(idLaboratorio) : undefined,
+        fechaDesde,
+        fechaHasta,
+        idPeriodo: idPeriodo ? Number(idPeriodo) : undefined,
+      },
+      resolvePagination(page, limit),
+    );
+  }
+
+  @Get('pendientes')
+  @Roles('laboratorista', 'admin')
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Máx. 100, por defecto 20',
+  })
+  @ApiOperation({
+    summary:
+      'Solicitudes aprobadas que todavía no tienen registro de bitácora (paginado)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '{ data, meta: { total, page, limit, totalPages } }',
+  })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Rol insuficiente' })
+  pendientes(@Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.bitacoraService.pendientesPorRegistrar(
+      resolvePagination(page, limit),
+    );
   }
 
   @Get(':id')

@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { seedAdmin, seedUsuariosDemo } from '../seed/seed';
 import { seedCatalogos } from '../../catalogos/seed/catalogos.seed';
 import { seedLaboratorios } from '../../laboratorios/seed/laboratorios.seed';
+import { backfillEventosSolicitud } from '../seed/backfill-eventos-solicitud';
 
 @Global()
 @Module({
@@ -32,6 +33,7 @@ import { seedLaboratorios } from '../../laboratorios/seed/laboratorios.seed';
           await seedUsuariosDemo(poolConection);
           await seedCatalogos(poolConection);
           await seedLaboratorios(poolConection);
+          await backfillEventosSolicitud(poolConection);
           return poolConection;
         } catch (error) {
           console.error('Error al conectar con la base de datos:', error);

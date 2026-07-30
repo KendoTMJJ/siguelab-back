@@ -302,7 +302,7 @@ async function seedSolicitudesYFirmas(
       rolFirmante: RolFirmante.LABORATORISTA,
       idFirmante: refs.laboratorista.idUsuario,
       resultado: ResultadoFirma.RECHAZADA,
-      motivoRechazo: 'Equipos de medición en mantenimiento esa semana.',
+      observacion: 'Equipos de medición en mantenimiento esa semana.',
       fechaHora: new Date('2026-07-27T11:00:00'),
     }),
   ]);

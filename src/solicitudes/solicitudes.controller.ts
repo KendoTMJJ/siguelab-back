@@ -21,8 +21,10 @@ import { SolicitudesService } from './solicitudes.service';
 import { CreateSolicitudDto } from './dto/create-solicitud.dto';
 import { CreateSolicitudDirectaDto } from './dto/create-solicitud-directa.dto';
 import { RechazarSolicitudDto } from './dto/rechazar-solicitud.dto';
+import { FirmarSolicitudDto } from './dto/firmar-solicitud.dto';
 import { CancelarSolicitudDto } from './dto/cancelar-solicitud.dto';
 import { EstadoSolicitud } from './entities/solicitud-reserva.entity';
+import { resolvePagination } from 'src/common/pagination/pagination.util';
 
 @ApiTags('Solicitudes')
 @ApiBearerAuth()
@@ -31,7 +33,7 @@ export class SolicitudesController {
   constructor(private readonly solicitudesService: SolicitudesService) {}
 
   @Post()
-  @Roles('estudiante', 'docente')
+  @Roles('estudiante', 'docente', 'laboratorista')
   @ApiOperation({ summary: 'Crear una solicitud de reserva' })
   @ApiResponse({ status: 201, description: 'Solicitud creada' })
   @ApiResponse({
@@ -128,11 +130,13 @@ export class SolicitudesController {
   })
   @ApiQuery({ name: 'fechaDesde', required: false, type: String })
   @ApiQuery({ name: 'fechaHasta', required: false, type: String })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Máx. 100, por defecto 20' })
   @ApiOperation({
     summary:
-      'Historial de solicitudes (docente: las suyas como encargado; laboratorista/admin: todas)',
+      'Historial de solicitudes (docente: las suyas como encargado; laboratorista/admin: todas) — paginado',
   })
-  @ApiResponse({ status: 200, description: 'Listado de solicitudes' })
+  @ApiResponse({ status: 200, description: '{ data, meta: { total, page, limit, totalPages } }' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Rol insuficiente' })
   findAll(
@@ -144,16 +148,22 @@ export class SolicitudesController {
     @Query('nombreSolicitante') nombreSolicitante?: string,
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.solicitudesService.findAll(usuario, {
-      estado,
-      idLaboratorio: idLaboratorio ? Number(idLaboratorio) : undefined,
-      idPeriodo: idPeriodo ? Number(idPeriodo) : undefined,
-      nombreLaboratorio,
-      nombreSolicitante,
-      fechaDesde,
-      fechaHasta,
-    });
+    return this.solicitudesService.findAll(
+      usuario,
+      {
+        estado,
+        idLaboratorio: idLaboratorio ? Number(idLaboratorio) : undefined,
+        idPeriodo: idPeriodo ? Number(idPeriodo) : undefined,
+        nombreLaboratorio,
+        nombreSolicitante,
+        fechaDesde,
+        fechaHasta,
+      },
+      resolvePagination(page, limit),
+    );
   }
 
   @Get(':id')
@@ -190,9 +200,10 @@ export class SolicitudesController {
   })
   firmar(
     @Param('id', ParseIntPipe) id: number,
+    @Body() firmarSolicitudDto: FirmarSolicitudDto,
     @CurrentUser() usuario: AuthenticatedUser,
   ) {
-    return this.solicitudesService.firmar(id, usuario);
+    return this.solicitudesService.firmar(id, usuario, firmarSolicitudDto);
   }
 
   @Post(':id/rechazar')

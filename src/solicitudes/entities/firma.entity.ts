@@ -58,8 +58,9 @@ export class Firma {
   })
   resultado!: ResultadoFirma;
 
-  @Column({ name: 'motivo_rechazo', type: 'text', nullable: true })
-  motivoRechazo?: string | null;
+  /** Comentario libre del firmante, puesto tanto al aprobar como al rechazar. */
+  @Column({ name: 'observacion', type: 'text', nullable: true })
+  observacion?: string | null;
 
   @Column({ name: 'fecha_hora', type: 'timestamp', nullable: true })
   fechaHora?: Date | null;
