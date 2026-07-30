@@ -10,22 +10,17 @@ import {
 import { RegistroUso } from './entities/registro-uso.entity';
 import { CreateRegistroUsoDto } from './dto/create-registro-uso.dto';
 import { UpdateRegistroUsoDto } from './dto/update-registro-uso.dto';
+import {
+  PaginatedResult,
+  buildPaginatedResult,
+} from 'src/common/pagination/paginated-result.interface';
+import { PaginationParams } from 'src/common/pagination/pagination.util';
 
 export interface FiltrosBitacora {
   idLaboratorio?: number;
   fechaDesde?: string;
   fechaHasta?: string;
   idPeriodo?: number;
-  /** Si se omiten page/pageSize, se devuelven todas las filas (sin paginar) — ver findAll. */
-  page?: number;
-  pageSize?: number;
-}
-
-export interface PaginaRegistroUso {
-  items: RegistroUso[];
-  total: number;
-  page: number;
-  pageSize: number;
 }
 
 @Injectable()
@@ -113,19 +108,22 @@ export class BitacoraService {
     return this.registroUsoRepository.save(registro);
   }
 
-  /**
-   * Sin `page`/`pageSize`: devuelve todo (compatibilidad con el cruce
-   * "pendientes por registrar" del front, que necesita el set completo de
-   * idSolicitud ya registrados, no una sola página). Con ambos: pagina.
-   */
-  async findAll(filtros: FiltrosBitacora): Promise<PaginaRegistroUso> {
+  /** registro_uso no tiene relación 1-a-N propia en el select (todas las
+   * relaciones que trae son N-a-1: laboratorio, tipoReserva, laboratorista,
+   * solicitud), así que a diferencia del historial de solicitudes acá sí es
+   * seguro paginar con skip/take directamente sobre el query con joins. */
+  async findAll(
+    filtros: FiltrosBitacora,
+    pagination: PaginationParams,
+  ): Promise<PaginatedResult<RegistroUso>> {
     const query = this.registroUsoRepository
       .createQueryBuilder('registro')
       .leftJoinAndSelect('registro.laboratorio', 'laboratorio')
       .leftJoinAndSelect('registro.tipoReserva', 'tipoReserva')
       .leftJoinAndSelect('registro.laboratorista', 'laboratorista')
       .leftJoinAndSelect('registro.solicitud', 'solicitud')
-      .orderBy('registro.fecha', 'DESC');
+      .orderBy('registro.fecha', 'DESC')
+      .addOrderBy('registro.idRegistro', 'DESC');
 
     if (filtros.idLaboratorio) {
       query.andWhere('registro.id_laboratorio = :idLaboratorio', {
@@ -150,17 +148,80 @@ export class BitacoraService {
       });
     }
 
-    if (filtros.page && filtros.pageSize) {
-      query.skip((filtros.page - 1) * filtros.pageSize).take(filtros.pageSize);
+    const [data, total] = await query
+      .skip(pagination.skip)
+      .take(pagination.take)
+      .getManyAndCount();
+
+    return buildPaginatedResult(data, total, pagination.page, pagination.limit);
+  }
+
+  /**
+   * Solicitudes aprobadas que TODAVÍA no tienen un registro de bitácora —
+   * antes esto se calculaba en el front cruzando GET /solicitudes?estado=aprobada
+   * completo contra GET /bitacora completo (dos tablas enteras en memoria del
+   * cliente). Acá es un anti-join server-side (NOT EXISTS), paginado, que
+   * nunca trae más filas que las de la página pedida.
+   */
+  /**
+   * Igual que SolicitudesService.findAll: paginado en dos pasos. No es por
+   * el join 1-a-N acá (no hay ninguno en esta consulta) sino porque esta
+   * versión de TypeORM no soporta un ORDER BY con subconsulta SQL cruda en
+   * una query que hidrata entidades (getMany/getManyAndCount fallan con
+   * "alias was not found" — ver createOrderByCombinedWithSelectExpression).
+   * Primero se resuelven los ids ya ordenados y paginados con una query
+   * "raw" (getRawMany, sin hidratar entidades — ahí sí funciona el orderBy
+   * crudo), y luego se cargan esos ids con sus relaciones, reordenando en
+   * JS según la posición que ya trae `ids`.
+   */
+  async pendientesPorRegistrar(
+    pagination: PaginationParams,
+  ): Promise<PaginatedResult<SolicitudReserva>> {
+    const idQuery = this.solicitudRepository
+      .createQueryBuilder('solicitud')
+      .select('solicitud.idSolicitud', 'idSolicitud')
+      .where('solicitud.estado = :estado', { estado: EstadoSolicitud.APROBADA })
+      .andWhere(
+        'NOT EXISTS (SELECT 1 FROM registro_uso registro WHERE registro.id_solicitud = solicitud.id_solicitud)',
+      )
+      // Orden por cuándo quedó aprobada (su último evento real), no por la
+      // fecha de la práctica: lo que importa acá es desde cuándo lleva
+      // esperando que alguien le registre el uso, igual que en
+      // SolicitudesService.findPendientesDeMiFirma — una práctica lejana
+      // aprobada hace mucho no debería quedar enterrada detrás de una
+      // práctica próxima aprobada recién.
+      .orderBy(
+        '(SELECT MAX(ev.fecha) FROM solicitud_evento ev WHERE ev.id_solicitud = solicitud.id_solicitud)',
+        'ASC',
+      )
+      .addOrderBy('solicitud.idSolicitud', 'ASC');
+
+    const total = await idQuery.getCount();
+    const filas = await idQuery
+      .skip(pagination.skip)
+      .take(pagination.take)
+      .getRawMany<{ idSolicitud: number }>();
+    const ids = filas.map((fila) => fila.idSolicitud);
+
+    if (ids.length === 0) {
+      return buildPaginatedResult([], total, pagination.page, pagination.limit);
     }
 
-    const [items, total] = await query.getManyAndCount();
-    return {
-      items,
-      total,
-      page: filtros.page ?? 1,
-      pageSize: filtros.pageSize ?? total,
-    };
+    const data = await this.solicitudRepository
+      .createQueryBuilder('solicitud')
+      .leftJoinAndSelect('solicitud.laboratorio', 'laboratorio')
+      .leftJoinAndSelect('solicitud.tipoReserva', 'tipoReserva')
+      .leftJoin('solicitud.docenteEncargado', 'docenteEncargado')
+      .addSelect(['docenteEncargado.idUsuario', 'docenteEncargado.nombre'])
+      .where('solicitud.idSolicitud IN (:...ids)', { ids })
+      .getMany();
+
+    const posicion = new Map(ids.map((id, indice) => [id, indice]));
+    data.sort(
+      (a, b) => posicion.get(a.idSolicitud)! - posicion.get(b.idSolicitud)!,
+    );
+
+    return buildPaginatedResult(data, total, pagination.page, pagination.limit);
   }
 
   async findOne(id: number): Promise<RegistroUso> {

@@ -20,7 +20,10 @@ describe('BitacoraService', () => {
     findOne: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
-  let solicitudRepository: { findOne: jest.Mock };
+  let solicitudRepository: {
+    findOne: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
   let laboratorioRepository: { findOne: jest.Mock };
   let tipoReservaRepository: { findOne: jest.Mock };
 
@@ -44,11 +47,19 @@ describe('BitacoraService', () => {
 
   const queryBuilderMock = {
     orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
+    leftJoin: jest.fn().mockReturnThis(),
     leftJoinAndSelect: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
     skip: jest.fn().mockReturnThis(),
     take: jest.fn().mockReturnThis(),
     getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    getCount: jest.fn().mockResolvedValue(0),
+    getMany: jest.fn().mockResolvedValue([]),
+    getRawMany: jest.fn().mockResolvedValue([]),
+    select: jest.fn().mockReturnThis(),
   };
 
   beforeEach(async () => {
@@ -58,7 +69,10 @@ describe('BitacoraService', () => {
       findOne: jest.fn(),
       createQueryBuilder: jest.fn(() => queryBuilderMock),
     };
-    solicitudRepository = { findOne: jest.fn() };
+    solicitudRepository = {
+      findOne: jest.fn(),
+      createQueryBuilder: jest.fn(() => queryBuilderMock),
+    };
     laboratorioRepository = { findOne: jest.fn() };
     tipoReservaRepository = { findOne: jest.fn() };
 
@@ -309,12 +323,17 @@ describe('BitacoraService', () => {
   });
 
   describe('findAll', () => {
+    const paginacionDefault = { page: 1, limit: 20, skip: 0, take: 20 };
+
     it('aplica los filtros de laboratorio y rango de fechas', async () => {
-      await service.findAll({
-        idLaboratorio: 1,
-        fechaDesde: '2026-08-01',
-        fechaHasta: '2026-08-31',
-      });
+      await service.findAll(
+        {
+          idLaboratorio: 1,
+          fechaDesde: '2026-08-01',
+          fechaHasta: '2026-08-31',
+        },
+        paginacionDefault,
+      );
 
       expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
         'registro.id_laboratorio = :idLaboratorio',
@@ -331,7 +350,7 @@ describe('BitacoraService', () => {
     });
 
     it('siempre resuelve laboratorio, tipoReserva, laboratorista y solicitud con join', async () => {
-      await service.findAll({});
+      await service.findAll({}, paginacionDefault);
 
       expect(queryBuilderMock.leftJoinAndSelect).toHaveBeenCalledWith(
         'registro.laboratorio',
@@ -352,7 +371,7 @@ describe('BitacoraService', () => {
     });
 
     it('filtra por periodo reusando el alias de la solicitud ya unida', async () => {
-      await service.findAll({ idPeriodo: 3 });
+      await service.findAll({ idPeriodo: 3 }, paginacionDefault);
 
       expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
         'solicitud.id_periodo = :idPeriodo',
@@ -360,36 +379,64 @@ describe('BitacoraService', () => {
       );
     });
 
-    it('sin page/pageSize no aplica skip/take y devuelve pageSize = total', async () => {
+    it('siempre aplica skip/take, incluso con la paginación por defecto', async () => {
       queryBuilderMock.getManyAndCount.mockResolvedValueOnce([
         [{ idRegistro: 1 }],
         1,
       ]);
 
-      const resultado = await service.findAll({});
+      const resultado = await service.findAll({}, paginacionDefault);
 
-      expect(queryBuilderMock.skip).not.toHaveBeenCalled();
-      expect(queryBuilderMock.take).not.toHaveBeenCalled();
+      expect(queryBuilderMock.skip).toHaveBeenCalledWith(0);
+      expect(queryBuilderMock.take).toHaveBeenCalledWith(20);
       expect(resultado).toEqual({
-        items: [{ idRegistro: 1 }],
-        total: 1,
-        page: 1,
-        pageSize: 1,
+        data: [{ idRegistro: 1 }],
+        meta: { total: 1, page: 1, limit: 20, totalPages: 1 },
       });
     });
 
-    it('con page/pageSize aplica skip/take y los devuelve en la respuesta', async () => {
+    it('con page/limit explícitos aplica skip/take y los devuelve en meta', async () => {
       queryBuilderMock.getManyAndCount.mockResolvedValueOnce([[], 42]);
 
-      const resultado = await service.findAll({ page: 2, pageSize: 20 });
+      const resultado = await service.findAll(
+        {},
+        { page: 2, limit: 20, skip: 20, take: 20 },
+      );
 
       expect(queryBuilderMock.skip).toHaveBeenCalledWith(20);
       expect(queryBuilderMock.take).toHaveBeenCalledWith(20);
       expect(resultado).toEqual({
-        items: [],
-        total: 42,
-        page: 2,
-        pageSize: 20,
+        data: [],
+        meta: { total: 42, page: 2, limit: 20, totalPages: 3 },
+      });
+    });
+  });
+
+  describe('pendientesPorRegistrar', () => {
+    it('filtra aprobadas sin registro de bitácora y pagina', async () => {
+      queryBuilderMock.getCount.mockResolvedValueOnce(1);
+      queryBuilderMock.getRawMany.mockResolvedValueOnce([{ idSolicitud: 5 }]);
+      queryBuilderMock.getMany.mockResolvedValueOnce([{ idSolicitud: 5 }]);
+
+      const resultado = await service.pendientesPorRegistrar({
+        page: 1,
+        limit: 20,
+        skip: 0,
+        take: 20,
+      });
+
+      expect(queryBuilderMock.where).toHaveBeenCalledWith(
+        'solicitud.estado = :estado',
+        { estado: EstadoSolicitud.APROBADA },
+      );
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('NOT EXISTS'),
+      );
+      expect(queryBuilderMock.skip).toHaveBeenCalledWith(0);
+      expect(queryBuilderMock.take).toHaveBeenCalledWith(20);
+      expect(resultado).toEqual({
+        data: [{ idSolicitud: 5 }],
+        meta: { total: 1, page: 1, limit: 20, totalPages: 1 },
       });
     });
   });

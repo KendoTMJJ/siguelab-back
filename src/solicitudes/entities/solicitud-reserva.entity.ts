@@ -14,6 +14,7 @@ import { EspacioAcademico } from 'src/catalogos/entities/espacio-academico.entit
 import { Facultad } from 'src/catalogos/entities/facultad.entity';
 import { PeriodoAcademico } from 'src/catalogos/entities/periodo-academico.entity';
 import { Firma } from './firma.entity';
+import { SolicitudEvento } from './solicitud-evento.entity';
 
 export enum EstadoSolicitud {
   PENDIENTE_DOCENTE = 'pendiente_docente',
@@ -129,6 +130,9 @@ export class SolicitudReserva {
 
   @OneToMany(() => Firma, (firma) => firma.solicitud)
   firmas!: Firma[];
+
+  @OneToMany(() => SolicitudEvento, (evento) => evento.solicitud)
+  eventos!: SolicitudEvento[];
 
   @CreateDateColumn({ name: 'fecha_creacion' })
   fechaCreacion!: Date;

@@ -1,6 +1,11 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorator';
+import {
+  PaginatedResult,
+  buildPaginatedResult,
+} from 'src/common/pagination/paginated-result.interface';
+import { PaginationParams } from 'src/common/pagination/pagination.util';
 import {
   Laboratorio,
   EstadoLaboratorio,
@@ -25,9 +30,14 @@ import {
   SolicitudReserva,
 } from './entities/solicitud-reserva.entity';
 import { Firma, ResultadoFirma, RolFirmante } from './entities/firma.entity';
+import {
+  SolicitudEvento,
+  TipoEventoSolicitud,
+} from './entities/solicitud-evento.entity';
 import { CreateSolicitudDto } from './dto/create-solicitud.dto';
 import { CreateSolicitudDirectaDto } from './dto/create-solicitud-directa.dto';
 import { RechazarSolicitudDto } from './dto/rechazar-solicitud.dto';
+import { FirmarSolicitudDto } from './dto/firmar-solicitud.dto';
 import { CancelarSolicitudDto } from './dto/cancelar-solicitud.dto';
 
 const DIAS_SEMANA_POR_INDICE: DiaSemana[] = [
@@ -77,6 +87,7 @@ export class SolicitudesService {
   private readonly usuarioRepository: Repository<Usuario>;
   private readonly horarioAcademicoRepository: Repository<HorarioAcademico>;
   private readonly rolRepository: Repository<Rol>;
+  private readonly eventoRepository: Repository<SolicitudEvento>;
 
   constructor(
     private readonly dataSource: DataSource,
@@ -99,6 +110,33 @@ export class SolicitudesService {
     this.horarioAcademicoRepository =
       this.dataSource.getRepository(HorarioAcademico);
     this.rolRepository = this.dataSource.getRepository(Rol);
+    this.eventoRepository = this.dataSource.getRepository(SolicitudEvento);
+  }
+
+  /**
+   * Único punto que escribe en solicitud_evento — append-only, se llama
+   * desde cada lugar donde SolicitudesService ya cambiaba el estado (crear,
+   * firmar, rechazar, cancelar). No lanza si falla: un evento de trazabilidad
+   * que no se pudo guardar no debe tumbar la operación real que sí cambió el
+   * estado de la solicitud.
+   */
+  private async registrarEvento(
+    idSolicitud: number,
+    tipo: TipoEventoSolicitud,
+    idActor: string | null,
+    detalle?: string | null,
+  ): Promise<void> {
+    try {
+      const evento = this.eventoRepository.create({
+        idSolicitud,
+        tipo,
+        idActor,
+        detalle: detalle ?? null,
+      });
+      await this.eventoRepository.save(evento);
+    } catch (error) {
+      console.error('No se pudo registrar el evento de trazabilidad', error);
+    }
   }
 
   // ───────────────────────── helpers de negocio ─────────────────────────
@@ -526,6 +564,12 @@ export class SolicitudesService {
       );
     }
 
+    await this.registrarEvento(
+      solicitudCreada.idSolicitud,
+      TipoEventoSolicitud.CREADA,
+      solicitante.id,
+    );
+
     return this.findOne(solicitudCreada.idSolicitud, solicitante);
   }
 
@@ -744,6 +788,27 @@ export class SolicitudesService {
       );
     }
 
+    const detalleDirecta =
+      'Reserva directa creada por un administrador (sin firmas ni antelación mínima)';
+    await this.registrarEvento(
+      solicitudCreada.idSolicitud,
+      TipoEventoSolicitud.CREADA,
+      admin.id,
+      detalleDirecta,
+    );
+    await this.registrarEvento(
+      solicitudCreada.idSolicitud,
+      TipoEventoSolicitud.FIRMA_DOCENTE_APROBADA,
+      admin.id,
+      detalleDirecta,
+    );
+    await this.registrarEvento(
+      solicitudCreada.idSolicitud,
+      TipoEventoSolicitud.FIRMA_LABORATORISTA_APROBADA,
+      admin.id,
+      detalleDirecta,
+    );
+
     return this.findOne(solicitudCreada.idSolicitud, admin);
   }
 
@@ -754,7 +819,8 @@ export class SolicitudesService {
   ): Promise<SolicitudReserva> {
     const solicitud = await this.solicitudRepository.findOne({
       where: { idSolicitud },
-      relations: { firmas: true },
+      relations: { firmas: true, eventos: true },
+      order: { eventos: { fecha: 'ASC' } },
     });
     if (!solicitud) {
       throw new HttpException('Solicitud no encontrada', HttpStatus.NOT_FOUND);
@@ -765,6 +831,7 @@ export class SolicitudesService {
   async firmar(
     idSolicitud: number,
     usuario: AuthenticatedUser,
+    dto?: FirmarSolicitudDto,
   ): Promise<SolicitudReserva> {
     const solicitud = await this.cargarConFirmas(idSolicitud);
 
@@ -786,6 +853,7 @@ export class SolicitudesService {
           resultado: ResultadoFirma.APROBADA,
           idFirmante: usuario.id,
           fechaHora: new Date(),
+          observacion: dto?.observacion ?? null,
         },
       );
       if (resultado.affected === 0) {
@@ -819,6 +887,12 @@ export class SolicitudesService {
         TipoEventoNotificacion.PENDIENTE_FIRMA,
         actualizada,
         await this.todosLosLaboratoristas(),
+      );
+      await this.registrarEvento(
+        idSolicitud,
+        TipoEventoSolicitud.FIRMA_DOCENTE_APROBADA,
+        usuario.id,
+        dto?.observacion,
       );
       return actualizada;
     }
@@ -862,7 +936,7 @@ export class SolicitudesService {
           },
           {
             resultado: ResultadoFirma.RECHAZADA,
-            motivoRechazo: `Rechazo automático del sistema: ${disponibilidad.motivo}`,
+            observacion: `Rechazo automático del sistema: ${disponibilidad.motivo}`,
             idFirmante: usuario.id,
             fechaHora: new Date(),
           },
@@ -896,6 +970,12 @@ export class SolicitudesService {
           ],
           `Sin disponibilidad al momento de firmar: ${disponibilidad.motivo}`,
         );
+        await this.registrarEvento(
+          idSolicitud,
+          TipoEventoSolicitud.FIRMA_LABORATORISTA_RECHAZADA,
+          usuario.id,
+          `Rechazo automático del sistema: ${disponibilidad.motivo}`,
+        );
 
         throw new HttpException(
           `Sin disponibilidad: ${disponibilidad.motivo}. La solicitud quedó rechazada.`,
@@ -913,6 +993,7 @@ export class SolicitudesService {
           resultado: ResultadoFirma.APROBADA,
           idFirmante: usuario.id,
           fechaHora: new Date(),
+          observacion: dto?.observacion ?? null,
         },
       );
       if (resultado.affected === 0) {
@@ -941,6 +1022,12 @@ export class SolicitudesService {
           },
         ],
       );
+      await this.registrarEvento(
+        idSolicitud,
+        TipoEventoSolicitud.FIRMA_LABORATORISTA_APROBADA,
+        usuario.id,
+        dto?.observacion,
+      );
       return actualizada;
     }
 
@@ -958,6 +1045,10 @@ export class SolicitudesService {
     const solicitud = await this.cargarConFirmas(idSolicitud);
 
     let ordenAResolver: number;
+    const rolQueRechaza =
+      solicitud.estado === EstadoSolicitud.PENDIENTE_DOCENTE
+        ? TipoEventoSolicitud.FIRMA_DOCENTE_RECHAZADA
+        : TipoEventoSolicitud.FIRMA_LABORATORISTA_RECHAZADA;
     if (solicitud.estado === EstadoSolicitud.PENDIENTE_DOCENTE) {
       if (usuario.id !== solicitud.idDocenteEncargado) {
         throw new HttpException(
@@ -991,7 +1082,7 @@ export class SolicitudesService {
       },
       {
         resultado: ResultadoFirma.RECHAZADA,
-        motivoRechazo: dto.motivo,
+        observacion: dto.motivo,
         idFirmante: usuario.id,
         fechaHora: new Date(),
       },
@@ -1021,6 +1112,12 @@ export class SolicitudesService {
           correo: solicitanteUsuario.correo,
         },
       ],
+      dto.motivo,
+    );
+    await this.registrarEvento(
+      idSolicitud,
+      rolQueRechaza,
+      usuario.id,
       dto.motivo,
     );
 
@@ -1077,6 +1174,12 @@ export class SolicitudesService {
         },
       ],
     );
+    await this.registrarEvento(
+      idSolicitud,
+      TipoEventoSolicitud.CANCELADA,
+      usuario.id,
+      dto.motivoCancelacion,
+    );
 
     return actualizada;
   }
@@ -1086,32 +1189,89 @@ export class SolicitudesService {
   async findMias(usuario: AuthenticatedUser): Promise<SolicitudReserva[]> {
     return this.solicitudRepository.find({
       where: { idSolicitante: usuario.id },
-      relations: { firmas: true },
-      order: { fechaCreacion: 'DESC' },
+      relations: { firmas: true, eventos: true },
+      order: { fechaCreacion: 'DESC', eventos: { fecha: 'ASC' } },
     });
   }
 
+  /**
+   * Paginado en dos pasos por la misma razón que findAll (historial) y
+   * BitacoraService.pendientesPorRegistrar: esta versión de TypeORM no
+   * soporta un ORDER BY con subconsulta SQL cruda en una query que hidrata
+   * entidades (getMany falla con "alias was not found"). Se resuelven
+   * primero los ids ya ordenados con una query "raw" (getRawMany, sin
+   * hidratar — ahí el orderBy crudo sí funciona) y luego se cargan esos ids
+   * con sus relaciones, reordenando en JS.
+   */
   async findPendientesDeMiFirma(
     usuario: AuthenticatedUser,
   ): Promise<SolicitudReserva[]> {
+    if (usuario.rol !== 'docente' && usuario.rol !== 'laboratorista') {
+      return [];
+    }
+
+    const idQuery = this.solicitudRepository
+      .createQueryBuilder('solicitud')
+      .select('solicitud.idSolicitud', 'idSolicitud')
+      // Orden por el último evento real de cada solicitud (creada, firma
+      // docente aprobada...), no por fecha_creacion: para el laboratorista,
+      // lo que importa es desde cuándo le corresponde a ÉL resolverla — una
+      // solicitud creada directo por un docente entra a su cola de inmediato
+      // (evento "creada"), mientras que una de estudiante solo entra tras la
+      // firma del docente (evento "firma_docente_aprobada"); ambas pueden
+      // compartir fecha_creacion cercana pero llevar tiempos de espera muy
+      // distintos en SU cola.
+      .orderBy(
+        '(SELECT MAX(ev.fecha) FROM solicitud_evento ev WHERE ev.id_solicitud = solicitud.id_solicitud)',
+        'ASC',
+      );
+
     if (usuario.rol === 'docente') {
-      return this.solicitudRepository.find({
-        where: {
+      idQuery
+        .andWhere('solicitud.estado = :estado', {
           estado: EstadoSolicitud.PENDIENTE_DOCENTE,
-          idDocenteEncargado: usuario.id,
-        },
-        relations: { firmas: true },
-        order: { fechaCreacion: 'ASC' },
+        })
+        .andWhere('solicitud.id_docente_encargado = :idDocente', {
+          idDocente: usuario.id,
+        });
+    } else {
+      idQuery.andWhere('solicitud.estado = :estado', {
+        estado: EstadoSolicitud.PENDIENTE_LABORATORISTA,
       });
     }
-    if (usuario.rol === 'laboratorista') {
-      return this.solicitudRepository.find({
-        where: { estado: EstadoSolicitud.PENDIENTE_LABORATORISTA },
-        relations: { firmas: true },
-        order: { fechaCreacion: 'ASC' },
-      });
+
+    const filas = await idQuery.getRawMany<{ idSolicitud: number }>();
+    const ids = filas.map((fila) => fila.idSolicitud);
+    if (ids.length === 0) {
+      return [];
     }
-    return [];
+
+    const data = await this.solicitudRepository
+      .createQueryBuilder('solicitud')
+      .leftJoinAndSelect('solicitud.firmas', 'firmas')
+      .leftJoinAndSelect('solicitud.eventos', 'eventos')
+      .leftJoinAndSelect('solicitud.espacioAcademico', 'espacioAcademico')
+      .leftJoinAndSelect('solicitud.facultad', 'facultad')
+      .leftJoinAndSelect('solicitud.periodoAcademico', 'periodoAcademico')
+      .leftJoin('solicitud.solicitante', 'solicitante')
+      .addSelect([
+        'solicitante.idUsuario',
+        'solicitante.nombre',
+        'solicitante.correo',
+      ])
+      .leftJoin('solicitud.docenteEncargado', 'docenteEncargado')
+      .addSelect([
+        'docenteEncargado.idUsuario',
+        'docenteEncargado.nombre',
+        'docenteEncargado.correo',
+      ])
+      .where('solicitud.idSolicitud IN (:...ids)', { ids })
+      .getMany();
+
+    const posicion = new Map(ids.map((id, indice) => [id, indice]));
+    return data.sort(
+      (a, b) => posicion.get(a.idSolicitud)! - posicion.get(b.idSolicitud)!,
+    );
   }
 
   async findOne(
@@ -1120,7 +1280,8 @@ export class SolicitudesService {
   ): Promise<SolicitudReserva> {
     const solicitud = await this.solicitudRepository.findOne({
       where: { idSolicitud },
-      relations: { firmas: true },
+      relations: { firmas: true, eventos: true },
+      order: { eventos: { fecha: 'ASC' } },
     });
     if (!solicitud) {
       throw new HttpException('Solicitud no encontrada', HttpStatus.NOT_FOUND);
@@ -1154,13 +1315,56 @@ export class SolicitudesService {
    * muestra las que aún esperan su firma). Laboratorista/admin: todas, igual
    * que la bandeja compartida de firmas.
    */
+  /**
+   * Paginado en dos pasos a propósito: `firmas` es one-to-many, así que un
+   * único query con leftJoinAndSelect(firmas) + skip/take paginaría sobre
+   * filas ya multiplicadas por el join (el clásico bug de TypeORM con
+   * paginación + relación 1-a-N — algunas solicitudes con varias firmas
+   * quedarían repetidas o la página traería menos solicitudes reales de las
+   * pedidas). Primero se resuelven los ids de la página (sin relaciones que
+   * multipliquen filas) y luego se cargan esos ids con todas sus relaciones.
+   */
   async findAll(
     usuario: AuthenticatedUser,
     filtros: FiltrosSolicitudes,
-  ): Promise<SolicitudReserva[]> {
-    const query = this.solicitudRepository
+    pagination: PaginationParams,
+  ): Promise<PaginatedResult<SolicitudReserva>> {
+    const idQuery = this.solicitudRepository
+      .createQueryBuilder('solicitud')
+      .leftJoin('solicitud.laboratorio', 'laboratorio')
+      .leftJoin('solicitud.solicitante', 'solicitante')
+      .select('solicitud.idSolicitud', 'idSolicitud')
+      // Orden por el último evento real (creada, firmada, rechazada,
+      // cancelada...), no por fecha_practica: el historial es una bitácora
+      // de actividad — lo más recientemente modificado va primero, igual
+      // que el orden natural de un feed. Mismo criterio de
+      // "MAX(solicitud_evento.fecha)" que ya usan findPendientesDeMiFirma
+      // (bandeja) y BitacoraService.pendientesPorRegistrar, solo que DESC
+      // en vez de ASC — acá interesa ver lo más reciente primero, no lo que
+      // lleva más tiempo esperando.
+      .orderBy(
+        '(SELECT MAX(ev.fecha) FROM solicitud_evento ev WHERE ev.id_solicitud = solicitud.id_solicitud)',
+        'DESC',
+      )
+      .addOrderBy('solicitud.idSolicitud', 'DESC');
+
+    this.aplicarFiltrosHistorial(idQuery, usuario, filtros);
+
+    const total = await idQuery.getCount();
+    const filas = await idQuery
+      .skip(pagination.skip)
+      .take(pagination.take)
+      .getRawMany<{ idSolicitud: number }>();
+    const ids = filas.map((fila) => fila.idSolicitud);
+
+    if (ids.length === 0) {
+      return buildPaginatedResult([], total, pagination.page, pagination.limit);
+    }
+
+    const data = await this.solicitudRepository
       .createQueryBuilder('solicitud')
       .leftJoinAndSelect('solicitud.firmas', 'firmas')
+      .leftJoinAndSelect('solicitud.eventos', 'eventos')
       .leftJoinAndSelect('solicitud.laboratorio', 'laboratorio')
       .leftJoinAndSelect('solicitud.tipoReserva', 'tipoReserva')
       .leftJoinAndSelect('solicitud.espacioAcademico', 'espacioAcademico')
@@ -1176,8 +1380,28 @@ export class SolicitudesService {
         'docenteEncargado.nombre',
         'docenteEncargado.correo',
       ])
-      .orderBy('solicitud.fecha_practica', 'DESC');
+      .where('solicitud.idSolicitud IN (:...ids)', { ids })
+      .getMany();
 
+    // Sin orderBy acá a propósito: esta versión de TypeORM no soporta un
+    // ORDER BY con subconsulta SQL cruda en una query que hidrata entidades
+    // con joins 1-a-N (falla con "alias was not found" — ver
+    // createOrderByCombinedWithSelectExpression). El orden real ya lo dio
+    // idQuery (arriba, con getRawMany — ahí sí funciona), así que acá solo
+    // se reordena en JS según la posición de cada id en `ids`.
+    const posicion = new Map(ids.map((id, indice) => [id, indice]));
+    data.sort(
+      (a, b) => posicion.get(a.idSolicitud)! - posicion.get(b.idSolicitud)!,
+    );
+
+    return buildPaginatedResult(data, total, pagination.page, pagination.limit);
+  }
+
+  private aplicarFiltrosHistorial(
+    query: SelectQueryBuilder<SolicitudReserva>,
+    usuario: AuthenticatedUser,
+    filtros: FiltrosSolicitudes,
+  ): void {
     if (usuario.rol === 'docente') {
       query.andWhere('solicitud.id_docente_encargado = :idDocente', {
         idDocente: usuario.id,
@@ -1219,8 +1443,6 @@ export class SolicitudesService {
         fechaHasta: filtros.fechaHasta,
       });
     }
-
-    return query.getMany();
   }
 
   async disponibilidad(

@@ -5,6 +5,11 @@ import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
 import { Rol } from 'src/roles/entities/rol.entity';
 import { Usuario } from './entities/usuario.entity';
+import {
+  PaginatedResult,
+  buildPaginatedResult,
+} from 'src/common/pagination/paginated-result.interface';
+import { PaginationParams } from 'src/common/pagination/pagination.util';
 
 const ROL_REGISTRO_PUBLICO = 'estudiante';
 
@@ -86,8 +91,41 @@ export class UsuariosService {
     }
   }
 
-  async findAll(): Promise<Usuario[]> {
-    return this.usuarioRepository.find({ relations: { rol: true } });
+  /**
+   * Único punto de entrada para listar usuarios — paginado siempre (ver
+   * PaginationParams: nunca "sin límite"). `buscar` reemplaza al antiguo
+   * GET /usuarios/nombre/:nombreUsuario, que traía la coincidencia completa
+   * sin paginar; ahora es el mismo filtro combinado con la paginación.
+   */
+  async findAll(
+    pagination: PaginationParams,
+    buscar?: string,
+    rol?: string,
+    estado?: string,
+  ): Promise<PaginatedResult<Usuario>> {
+    const query = this.usuarioRepository
+      .createQueryBuilder('usuario')
+      .leftJoinAndSelect('usuario.rol', 'rol')
+      .orderBy('usuario.nombre', 'ASC');
+
+    if (buscar) {
+      query.andWhere('LOWER(usuario.nombre) LIKE LOWER(:buscar)', {
+        buscar: `%${buscar}%`,
+      });
+    }
+    if (rol) {
+      query.andWhere('rol.nombre = :rol', { rol });
+    }
+    if (estado) {
+      query.andWhere('usuario.estado = :estado', { estado });
+    }
+
+    const [data, total] = await query
+      .skip(pagination.skip)
+      .take(pagination.take)
+      .getManyAndCount();
+
+    return buildPaginatedResult(data, total, pagination.page, pagination.limit);
   }
 
   async findOne(id: string): Promise<Usuario> {
@@ -99,15 +137,6 @@ export class UsuariosService {
       throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
     }
     return usuario;
-  }
-  async findByNombre(nombreUsuario: string): Promise<Usuario[]> {
-    return this.usuarioRepository
-      .createQueryBuilder('usuario')
-      .leftJoinAndSelect('usuario.rol', 'rol')
-      .where('LOWER(usuario.nombre) LIKE LOWER(:nombre)', {
-        nombre: `%${nombreUsuario}%`,
-      })
-      .getMany();
   }
 
   async findByCorreo(correo: string): Promise<Usuario | null> {
