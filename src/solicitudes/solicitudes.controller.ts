@@ -131,12 +131,20 @@ export class SolicitudesController {
   @ApiQuery({ name: 'fechaDesde', required: false, type: String })
   @ApiQuery({ name: 'fechaHasta', required: false, type: String })
   @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Máx. 100, por defecto 20' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Máx. 100, por defecto 20',
+  })
   @ApiOperation({
     summary:
       'Historial de solicitudes (docente: las suyas como encargado; laboratorista/admin: todas) — paginado',
   })
-  @ApiResponse({ status: 200, description: '{ data, meta: { total, page, limit, totalPages } }' })
+  @ApiResponse({
+    status: 200,
+    description: '{ data, meta: { total, page, limit, totalPages } }',
+  })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Rol insuficiente' })
   findAll(

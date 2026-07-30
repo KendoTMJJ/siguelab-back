@@ -217,7 +217,9 @@ export class BitacoraService {
       .getMany();
 
     const posicion = new Map(ids.map((id, indice) => [id, indice]));
-    data.sort((a, b) => posicion.get(a.idSolicitud)! - posicion.get(b.idSolicitud)!);
+    data.sort(
+      (a, b) => posicion.get(a.idSolicitud)! - posicion.get(b.idSolicitud)!,
+    );
 
     return buildPaginatedResult(data, total, pagination.page, pagination.limit);
   }

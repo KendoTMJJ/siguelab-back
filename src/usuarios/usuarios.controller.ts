@@ -28,16 +28,29 @@ export class UsuariosController {
 
   @Get()
   @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Máx. 100, por defecto 20' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Máx. 100, por defecto 20',
+  })
   @ApiQuery({
     name: 'buscar',
     required: false,
-    description: 'Filtra por nombre (contiene, sin distinguir mayúsculas) — reemplaza al antiguo /usuarios/nombre/:nombreUsuario',
+    description:
+      'Filtra por nombre (contiene, sin distinguir mayúsculas) — reemplaza al antiguo /usuarios/nombre/:nombreUsuario',
   })
-  @ApiQuery({ name: 'rol', required: false, description: 'Filtra por nombre de rol exacto (ej. "docente")' })
+  @ApiQuery({
+    name: 'rol',
+    required: false,
+    description: 'Filtra por nombre de rol exacto (ej. "docente")',
+  })
   @ApiQuery({ name: 'estado', required: false, enum: ['activo', 'inactivo'] })
   @ApiOperation({ summary: 'Listar usuarios (paginado)' })
-  @ApiResponse({ status: 200, description: '{ data, meta: { total, page, limit, totalPages } }' })
+  @ApiResponse({
+    status: 200,
+    description: '{ data, meta: { total, page, limit, totalPages } }',
+  })
   findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -45,7 +58,12 @@ export class UsuariosController {
     @Query('rol') rol?: string,
     @Query('estado') estado?: string,
   ) {
-    return this.usuariosService.findAll(resolvePagination(page, limit), buscar, rol, estado);
+    return this.usuariosService.findAll(
+      resolvePagination(page, limit),
+      buscar,
+      rol,
+      estado,
+    );
   }
 
   @Get(':id')

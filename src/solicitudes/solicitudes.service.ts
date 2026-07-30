@@ -788,7 +788,8 @@ export class SolicitudesService {
       );
     }
 
-    const detalleDirecta = 'Reserva directa creada por un administrador (sin firmas ni antelación mínima)';
+    const detalleDirecta =
+      'Reserva directa creada por un administrador (sin firmas ni antelación mínima)';
     await this.registrarEvento(
       solicitudCreada.idSolicitud,
       TipoEventoSolicitud.CREADA,
@@ -1113,7 +1114,12 @@ export class SolicitudesService {
       ],
       dto.motivo,
     );
-    await this.registrarEvento(idSolicitud, rolQueRechaza, usuario.id, dto.motivo);
+    await this.registrarEvento(
+      idSolicitud,
+      rolQueRechaza,
+      usuario.id,
+      dto.motivo,
+    );
 
     return actualizada;
   }
@@ -1248,14 +1254,24 @@ export class SolicitudesService {
       .leftJoinAndSelect('solicitud.facultad', 'facultad')
       .leftJoinAndSelect('solicitud.periodoAcademico', 'periodoAcademico')
       .leftJoin('solicitud.solicitante', 'solicitante')
-      .addSelect(['solicitante.idUsuario', 'solicitante.nombre', 'solicitante.correo'])
+      .addSelect([
+        'solicitante.idUsuario',
+        'solicitante.nombre',
+        'solicitante.correo',
+      ])
       .leftJoin('solicitud.docenteEncargado', 'docenteEncargado')
-      .addSelect(['docenteEncargado.idUsuario', 'docenteEncargado.nombre', 'docenteEncargado.correo'])
+      .addSelect([
+        'docenteEncargado.idUsuario',
+        'docenteEncargado.nombre',
+        'docenteEncargado.correo',
+      ])
       .where('solicitud.idSolicitud IN (:...ids)', { ids })
       .getMany();
 
     const posicion = new Map(ids.map((id, indice) => [id, indice]));
-    return data.sort((a, b) => posicion.get(a.idSolicitud)! - posicion.get(b.idSolicitud)!);
+    return data.sort(
+      (a, b) => posicion.get(a.idSolicitud)! - posicion.get(b.idSolicitud)!,
+    );
   }
 
   async findOne(
@@ -1374,7 +1390,9 @@ export class SolicitudesService {
     // idQuery (arriba, con getRawMany — ahí sí funciona), así que acá solo
     // se reordena en JS según la posición de cada id en `ids`.
     const posicion = new Map(ids.map((id, indice) => [id, indice]));
-    data.sort((a, b) => posicion.get(a.idSolicitud)! - posicion.get(b.idSolicitud)!);
+    data.sort(
+      (a, b) => posicion.get(a.idSolicitud)! - posicion.get(b.idSolicitud)!,
+    );
 
     return buildPaginatedResult(data, total, pagination.page, pagination.limit);
   }

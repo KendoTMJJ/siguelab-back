@@ -20,7 +20,10 @@ describe('BitacoraService', () => {
     findOne: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
-  let solicitudRepository: { findOne: jest.Mock; createQueryBuilder: jest.Mock };
+  let solicitudRepository: {
+    findOne: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
   let laboratorioRepository: { findOne: jest.Mock };
   let tipoReservaRepository: { findOne: jest.Mock };
 

@@ -1,9 +1,16 @@
 import { DataSource } from 'typeorm';
-import { EstadoSolicitud, SolicitudReserva } from 'src/solicitudes/entities/solicitud-reserva.entity';
+import {
+  EstadoSolicitud,
+  SolicitudReserva,
+} from 'src/solicitudes/entities/solicitud-reserva.entity';
 import {
   SolicitudEvento,
   TipoEventoSolicitud,
 } from 'src/solicitudes/entities/solicitud-evento.entity';
+import {
+  ResultadoFirma,
+  RolFirmante,
+} from 'src/solicitudes/entities/firma.entity';
 
 /**
  * Backfill idempotente: reconstruye solicitud_evento para solicitudes creadas
@@ -51,15 +58,15 @@ export async function backfillEventosSolicitud(
       (a, b) => a.orden - b.orden,
     );
     for (const firma of firmasOrdenadas) {
-      if (firma.resultado === 'pendiente') {
+      if (firma.resultado === ResultadoFirma.PENDIENTE) {
         continue;
       }
-      const esDocente = firma.rolFirmante === 'docente';
+      const esDocente = firma.rolFirmante === RolFirmante.DOCENTE;
       const tipo = esDocente
-        ? firma.resultado === 'aprobada'
+        ? firma.resultado === ResultadoFirma.APROBADA
           ? TipoEventoSolicitud.FIRMA_DOCENTE_APROBADA
           : TipoEventoSolicitud.FIRMA_DOCENTE_RECHAZADA
-        : firma.resultado === 'aprobada'
+        : firma.resultado === ResultadoFirma.APROBADA
           ? TipoEventoSolicitud.FIRMA_LABORATORISTA_APROBADA
           : TipoEventoSolicitud.FIRMA_LABORATORISTA_RECHAZADA;
 
