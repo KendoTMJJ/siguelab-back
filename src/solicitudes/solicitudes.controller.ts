@@ -33,7 +33,7 @@ export class SolicitudesController {
   constructor(private readonly solicitudesService: SolicitudesService) {}
 
   @Post()
-  @Roles('estudiante', 'docente', 'laboratorista')
+  @Roles('estudiante', 'docente')
   @ApiOperation({ summary: 'Crear una solicitud de reserva' })
   @ApiResponse({ status: 201, description: 'Solicitud creada' })
   @ApiResponse({
@@ -61,9 +61,10 @@ export class SolicitudesController {
   }
 
   @Post('directa')
-  @Roles('admin')
+  @Roles('admin', 'laboratorista')
   @ApiOperation({
-    summary: 'Crear una solicitud ya aprobada, sin firmas (solo admin)',
+    summary:
+      'Crear una solicitud ya aprobada, sin firmas (admin y laboratorista)',
   })
   @ApiResponse({ status: 201, description: 'Solicitud creada y aprobada' })
   @ApiResponse({
@@ -71,7 +72,10 @@ export class SolicitudesController {
     description: 'Datos inválidos (reglas de negocio)',
   })
   @ApiResponse({ status: 401, description: 'No autenticado' })
-  @ApiResponse({ status: 403, description: 'Rol insuficiente (solo admin)' })
+  @ApiResponse({
+    status: 403,
+    description: 'Rol insuficiente (solo admin o laboratorista)',
+  })
   @ApiResponse({
     status: 404,
     description: 'Alguna entidad referenciada no existe',

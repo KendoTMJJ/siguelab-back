@@ -3,6 +3,7 @@ import * as bcrypt from 'bcrypt';
 import { DataSource, Repository } from 'typeorm';
 import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { Rol } from 'src/roles/entities/rol.entity';
 import { Usuario } from './entities/usuario.entity';
 import {
@@ -212,5 +213,56 @@ export class UsuariosService {
       })
       .where('id_usuario = :id', { id })
       .execute();
+  }
+
+  /**
+   * Autoedición (ver UpdateMeDto): cualquier usuario autenticado puede
+   * cambiar su propio nombre y/o contraseña — nunca su correo, rol ni
+   * estado (eso sigue siendo solo del admin, ver update()). Cambiar la
+   * contraseña exige reconfirmar la actual (defensa contra sesión
+   * secuestrada en un equipo compartido) y reusa cambiarContrasena(), que
+   * ya invalida el resto de sesiones (tokenVersion + 1).
+   */
+  async updateSelf(id: string, dto: UpdateMeDto): Promise<Usuario> {
+    if (dto.nombre === undefined && !dto.nuevaContrasena) {
+      throw new HttpException(
+        'Debes indicar al menos un cambio (nombre o contraseña)',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (dto.nuevaContrasena) {
+      if (!dto.contrasenaActual) {
+        throw new HttpException(
+          'Debes indicar tu contraseña actual para cambiarla',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const usuarioConContrasena = await this.usuarioRepository
+        .createQueryBuilder('usuario')
+        .addSelect('usuario.contrasena')
+        .where('usuario.id_usuario = :id', { id })
+        .getOne();
+      if (!usuarioConContrasena) {
+        throw new HttpException('Usuario no encontrado', HttpStatus.NOT_FOUND);
+      }
+      const coincide = await bcrypt.compare(
+        dto.contrasenaActual,
+        usuarioConContrasena.contrasena,
+      );
+      if (!coincide) {
+        throw new HttpException(
+          'La contraseña actual no es correcta',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      await this.cambiarContrasena(id, dto.nuevaContrasena);
+    }
+
+    if (dto.nombre !== undefined) {
+      await this.usuarioRepository.update(id, { nombre: dto.nombre });
+    }
+
+    return this.findOne(id);
   }
 }

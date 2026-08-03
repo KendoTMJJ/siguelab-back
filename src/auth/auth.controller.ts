@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Post,
+  Patch,
   Res,
   HttpCode,
   HttpStatus,
@@ -20,11 +21,16 @@ import { minutes, SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import type { AuthenticatedUser } from './decorators/current-user.decorator';
+import { UsuariosService } from 'src/usuarios/usuarios.service';
+import { UpdateMeDto } from 'src/usuarios/dto/update-me.dto';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly usuariosService: UsuariosService,
+  ) {}
 
   @Public()
   @Post('registro')
@@ -96,5 +102,26 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
     return user;
+  }
+
+  /**
+   * Autoedición: cualquier usuario autenticado cambia su propio nombre y/o
+   * contraseña — nunca correo, rol ni estado (ver UpdateMeDto y
+   * UsuariosService.updateSelf). Devuelve el mismo shape que GET /auth/me
+   * para que el front actualice currentUser() sin tener que refrescar.
+   */
+  @SkipThrottle({ login: true })
+  @Patch('me')
+  async updateMe(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateMeDto,
+  ) {
+    const actualizado = await this.usuariosService.updateSelf(user.id, dto);
+    return {
+      id: actualizado.idUsuario,
+      nombre: actualizado.nombre,
+      correo: actualizado.correo,
+      rol: actualizado.rol.nombre,
+    };
   }
 }
