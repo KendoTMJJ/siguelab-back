@@ -574,15 +574,16 @@ export class SolicitudesService {
   }
 
   /**
-   * Creación directa reservada a admin: se salta el flujo de firmas y la
-   * antelación mínima, pero NO se salta ninguna validación de disponibilidad
+   * Creación directa reservada a admin y laboratorista (ver @Roles en el
+   * controller): se salta el flujo de firmas y la antelación mínima, pero
+   * NO se salta ninguna validación de disponibilidad
    * (verificarDisponibilidad/horasCruzan corren igual que en create()) ni la
    * de fecha pasada. Queda aprobada de inmediato, con firmas ya resueltas
-   * (idFirmante = admin) para dejar trazabilidad de quién la generó.
+   * (idFirmante = quien la creó) para dejar trazabilidad de quién la generó.
    */
   async crearDirecta(
     dto: CreateSolicitudDirectaDto,
-    admin: AuthenticatedUser,
+    creador: AuthenticatedUser,
   ): Promise<SolicitudReserva> {
     const tipoReserva = await this.tipoReservaRepository.findOne({
       where: { idTipo: dto.idTipo },
@@ -724,7 +725,7 @@ export class SolicitudesService {
         const firmaRepo = manager.getRepository(Firma);
 
         const solicitud = solicitudRepo.create({
-          idSolicitante: admin.id,
+          idSolicitante: creador.id,
           idDocenteEncargado: dto.idDocenteEncargado,
           idLaboratorio: dto.idLaboratorio,
           idTipo: dto.idTipo,
@@ -751,7 +752,7 @@ export class SolicitudesService {
             idSolicitud: guardada.idSolicitud,
             orden: 1,
             rolFirmante: RolFirmante.DOCENTE,
-            idFirmante: admin.id,
+            idFirmante: creador.id,
             resultado: ResultadoFirma.APROBADA,
             fechaHora: ahora,
           }),
@@ -761,7 +762,7 @@ export class SolicitudesService {
             idSolicitud: guardada.idSolicitud,
             orden: 2,
             rolFirmante: RolFirmante.LABORATORISTA,
-            idFirmante: admin.id,
+            idFirmante: creador.id,
             resultado: ResultadoFirma.APROBADA,
             fechaHora: ahora,
           }),
@@ -788,28 +789,27 @@ export class SolicitudesService {
       );
     }
 
-    const detalleDirecta =
-      'Reserva directa creada por un administrador (sin firmas ni antelación mínima)';
+    const detalleDirecta = `Reserva directa creada por ${creador.rol === 'admin' ? 'un administrador' : 'un laboratorista'} (sin firmas ni antelación mínima)`;
     await this.registrarEvento(
       solicitudCreada.idSolicitud,
       TipoEventoSolicitud.CREADA,
-      admin.id,
+      creador.id,
       detalleDirecta,
     );
     await this.registrarEvento(
       solicitudCreada.idSolicitud,
       TipoEventoSolicitud.FIRMA_DOCENTE_APROBADA,
-      admin.id,
+      creador.id,
       detalleDirecta,
     );
     await this.registrarEvento(
       solicitudCreada.idSolicitud,
       TipoEventoSolicitud.FIRMA_LABORATORISTA_APROBADA,
-      admin.id,
+      creador.id,
       detalleDirecta,
     );
 
-    return this.findOne(solicitudCreada.idSolicitud, admin);
+    return this.findOne(solicitudCreada.idSolicitud, creador);
   }
 
   // ───────────────────────── verbos de negocio ─────────────────────────
