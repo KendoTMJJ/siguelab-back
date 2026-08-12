@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
 import { Rol } from 'src/roles/entities/rol.entity';
@@ -68,7 +68,32 @@ export class UsuariosService {
       rol: rolPorDefecto,
     });
 
-    return this.usuarioRepository.save(usuario);
+    try {
+      return await this.usuarioRepository.save(usuario);
+    } catch (error) {
+      // El navegador dispara varios requests en paralelo en el primer login
+      // (ej. /auth/me y otra llamada a la vez): dos pueden llegar a este
+      // punto sin haberse visto todavía y chocar contra el índice único de
+      // oid/correo. Quien pierde la carrera relee la fila que ya insertó
+      // el otro, en vez de propagar el 500.
+      if (this.esErrorDeDuplicado(error)) {
+        const creadoPorOtroRequest = await this.usuarioRepository.findOne({
+          where: [{ oid: perfil.oid }, { correo: perfil.correo }],
+          relations: { rol: true },
+        });
+        if (creadoPorOtroRequest) {
+          return creadoPorOtroRequest;
+        }
+      }
+      throw error;
+    }
+  }
+
+  private esErrorDeDuplicado(error: unknown): boolean {
+    return (
+      error instanceof QueryFailedError &&
+      (error as unknown as { code?: string }).code === 'ER_DUP_ENTRY'
+    );
   }
 
   /**
