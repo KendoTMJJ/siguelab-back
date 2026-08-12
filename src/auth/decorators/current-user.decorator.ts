@@ -6,6 +6,8 @@ export interface AuthenticatedUser {
   nombre: string;
   correo: string;
   rol: string;
+  cargo: string | null;
+  facultad: string | null;
 }
 
 interface RequestWithUser extends Request {

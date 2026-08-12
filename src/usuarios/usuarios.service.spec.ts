@@ -1,13 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpStatus } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import * as bcrypt from 'bcrypt';
-import { plainToInstance } from 'class-transformer';
-import { validate } from 'class-validator';
 import { UsuariosService } from './usuarios.service';
-import { EstadoUsuario, Usuario } from './entities/usuario.entity';
+import { EstadoUsuario } from './entities/usuario.entity';
 import { Rol } from 'src/roles/entities/rol.entity';
-import { UpdateMeDto } from './dto/update-me.dto';
 
 describe('UsuariosService', () => {
   let service: UsuariosService;
@@ -15,8 +11,6 @@ describe('UsuariosService', () => {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
-    find: jest.Mock;
-    update: jest.Mock;
     softRemove: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
@@ -24,36 +18,19 @@ describe('UsuariosService', () => {
 
   const UUID_ROL = 'b1f0c1d2-1111-4a2b-9c3d-000000000001';
   const UUID_USUARIO = 'b1f0c1d2-2222-4a2b-9c3d-000000000002';
+  const OID_ENTRA = 'entra-oid-0001';
 
   const rolEstudiante: Rol = { idRol: UUID_ROL, nombre: 'estudiante' };
 
-  const queryBuilderMock = {
-    addSelect: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    getOne: jest.fn(),
-    update: jest.fn().mockReturnThis(),
-    set: jest.fn().mockReturnThis(),
-    execute: jest.fn().mockResolvedValue(undefined),
-  };
-
   beforeEach(async () => {
-    jest.clearAllMocks();
-    queryBuilderMock.addSelect.mockReturnThis();
-    queryBuilderMock.where.mockReturnThis();
-    queryBuilderMock.update.mockReturnThis();
-    queryBuilderMock.set.mockReturnThis();
-    queryBuilderMock.execute.mockResolvedValue(undefined);
-
     usuarioRepository = {
       findOne: jest.fn(),
       create: jest.fn((data) => data),
       save: jest.fn((data) =>
         Promise.resolve({ ...data, idUsuario: UUID_USUARIO }),
       ),
-      find: jest.fn(),
-      update: jest.fn(),
       softRemove: jest.fn(),
-      createQueryBuilder: jest.fn(() => queryBuilderMock),
+      createQueryBuilder: jest.fn(),
     };
     rolRepository = { findOne: jest.fn() };
 
@@ -74,99 +51,93 @@ describe('UsuariosService', () => {
     service = module.get<UsuariosService>(UsuariosService);
   });
 
-  describe('registrarPublico', () => {
-    const datos = {
-      nombre: 'Estudiante Test',
+  describe('findOrCreateByOid', () => {
+    const perfil = {
+      oid: OID_ENTRA,
       correo: 'estudiante@usantoto.edu.co',
-      contrasena: '12345678',
+      nombre: 'Estudiante Entra',
+    };
+
+    it('retorna el usuario existente si el oid ya está vinculado', async () => {
+      const usuarioExistente = {
+        idUsuario: UUID_USUARIO,
+        oid: OID_ENTRA,
+        rol: rolEstudiante,
+      };
+      usuarioRepository.findOne.mockResolvedValueOnce(usuarioExistente);
+
+      const usuario = await service.findOrCreateByOid(perfil);
+
+      expect(usuario).toBe(usuarioExistente);
+      expect(usuarioRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('vincula el oid a una fila pre-creada por correo (ej. el admin sembrado)', async () => {
+      const filaPreCreada = {
+        idUsuario: UUID_USUARIO,
+        oid: null,
+        correo: perfil.correo,
+        rol: rolEstudiante,
+      };
+      usuarioRepository.findOne
+        .mockResolvedValueOnce(null) // por oid: no existe aún
+        .mockResolvedValueOnce(filaPreCreada); // por correo: sí existe
+
+      const usuario = await service.findOrCreateByOid(perfil);
+
+      expect(usuarioRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ oid: OID_ENTRA }),
+      );
+      expect(usuario.oid).toBe(OID_ENTRA);
+    });
+
+    it('crea un usuario nuevo con el rol por defecto si no existe por oid ni por correo', async () => {
+      usuarioRepository.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      rolRepository.findOne.mockResolvedValue(rolEstudiante);
+
+      const usuario = await service.findOrCreateByOid(perfil);
+
+      expect(usuario.rol).toEqual(rolEstudiante);
+      expect(usuario.oid).toBe(OID_ENTRA);
+      expect(usuario.correo).toBe(perfil.correo);
+    });
+
+    it('lanza error si no existe el rol por defecto', async () => {
+      usuarioRepository.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      rolRepository.findOne.mockResolvedValue(null);
+
+      await expect(service.findOrCreateByOid(perfil)).rejects.toMatchObject({
+        status: HttpStatus.INTERNAL_SERVER_ERROR,
+      });
+    });
+  });
+
+  describe('create', () => {
+    const dto = {
+      idRol: UUID_ROL,
+      nombre: 'Docente Nuevo',
+      correo: 'docente@usantoto.edu.co',
     };
 
     it('lanza CONFLICT si el correo ya está registrado', async () => {
       usuarioRepository.findOne.mockResolvedValue({ idUsuario: UUID_USUARIO });
 
-      await expect(service.registrarPublico(datos)).rejects.toMatchObject({
+      await expect(service.create(dto)).rejects.toMatchObject({
         status: HttpStatus.CONFLICT,
       });
     });
 
-    it('lanza error si no existe el rol estudiante', async () => {
+    it('crea el usuario sin oid (pendiente de su primer login)', async () => {
       usuarioRepository.findOne.mockResolvedValue(null);
-      rolRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.registrarPublico(datos)).rejects.toBeInstanceOf(
-        HttpException,
-      );
-    });
+      const usuario = await service.create(dto);
 
-    it('crea el usuario con la contraseña hasheada y correoVerificado en false', async () => {
-      usuarioRepository.findOne.mockResolvedValue(null);
-      rolRepository.findOne.mockResolvedValue(rolEstudiante);
-
-      const usuario = await service.registrarPublico(datos);
-
-      expect(usuario.correoVerificado).toBe(false);
-      expect(usuario.rol).toEqual(rolEstudiante);
-      expect(usuario.contrasena).not.toBe(datos.contrasena);
-      expect(await bcrypt.compare(datos.contrasena, usuario.contrasena)).toBe(
-        true,
-      );
-    });
-  });
-
-  describe('registrarIntentoFallido', () => {
-    const usuarioBase: Usuario = {
-      idUsuario: UUID_USUARIO,
-      intentosFallidos: 0,
-      bloqueadoHasta: null,
-    } as Usuario;
-
-    it('incrementa el contador sin bloquear antes del quinto intento', async () => {
-      await service.registrarIntentoFallido({
-        ...usuarioBase,
-        intentosFallidos: 3,
-      });
-
-      expect(usuarioRepository.update).toHaveBeenCalledWith(UUID_USUARIO, {
-        intentosFallidos: 4,
-        bloqueadoHasta: null,
-      });
-    });
-
-    it('bloquea la cuenta 15 minutos al llegar al quinto intento fallido', async () => {
-      const antes = Date.now();
-      await service.registrarIntentoFallido({
-        ...usuarioBase,
-        intentosFallidos: 4,
-      });
-
-      const llamada = usuarioRepository.update.mock.calls[0][1];
-      expect(llamada.intentosFallidos).toBe(5);
-      expect(llamada.bloqueadoHasta).toBeInstanceOf(Date);
-
-      const minutosBloqueo = (llamada.bloqueadoHasta.getTime() - antes) / 60000;
-      expect(minutosBloqueo).toBeGreaterThan(14);
-      expect(minutosBloqueo).toBeLessThanOrEqual(15);
-    });
-  });
-
-  describe('registrarLoginExitoso', () => {
-    it('resetea intentos fallidos y desbloquea la cuenta', async () => {
-      await service.registrarLoginExitoso(UUID_USUARIO);
-
-      expect(usuarioRepository.update).toHaveBeenCalledWith(UUID_USUARIO, {
-        intentosFallidos: 0,
-        bloqueadoHasta: null,
-      });
-    });
-  });
-
-  describe('marcarCorreoVerificado', () => {
-    it('marca correoVerificado en true', async () => {
-      await service.marcarCorreoVerificado(UUID_USUARIO);
-
-      expect(usuarioRepository.update).toHaveBeenCalledWith(UUID_USUARIO, {
-        correoVerificado: true,
-      });
+      expect(usuario.oid).toBeUndefined();
+      expect(usuario.correo).toBe(dto.correo);
     });
   });
 
@@ -224,138 +195,5 @@ describe('UsuariosService', () => {
         correo: 'corregido@usantoto.edu.co',
       });
     });
-  });
-
-  describe('updateSelf', () => {
-    const dtoBase: UpdateMeDto = {};
-
-    it('lanza BAD_REQUEST si no se indica nombre ni nuevaContrasena', async () => {
-      await expect(
-        service.updateSelf(UUID_USUARIO, dtoBase),
-      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
-    });
-
-    it('actualiza solo el nombre, sin tocar la contraseña', async () => {
-      usuarioRepository.findOne.mockResolvedValue({
-        idUsuario: UUID_USUARIO,
-        nombre: 'Nombre Nuevo',
-        correo: 'estudiante@usantoto.edu.co',
-        rol: rolEstudiante,
-      });
-
-      const resultado = await service.updateSelf(UUID_USUARIO, {
-        nombre: 'Nombre Nuevo',
-      });
-
-      expect(usuarioRepository.update).toHaveBeenCalledWith(UUID_USUARIO, {
-        nombre: 'Nombre Nuevo',
-      });
-      expect(queryBuilderMock.getOne).not.toHaveBeenCalled();
-      expect(resultado.nombre).toBe('Nombre Nuevo');
-    });
-
-    it('lanza BAD_REQUEST si pide nuevaContrasena sin contrasenaActual', async () => {
-      await expect(
-        service.updateSelf(UUID_USUARIO, { nuevaContrasena: 'Nueva12345' }),
-      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
-      expect(queryBuilderMock.getOne).not.toHaveBeenCalled();
-    });
-
-    it('lanza NOT_FOUND si el usuario no existe al verificar la contraseña actual', async () => {
-      queryBuilderMock.getOne.mockResolvedValue(null);
-
-      await expect(
-        service.updateSelf(UUID_USUARIO, {
-          contrasenaActual: 'ActualCorrecta1',
-          nuevaContrasena: 'Nueva12345',
-        }),
-      ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
-    });
-
-    it('lanza BAD_REQUEST si la contraseña actual no coincide', async () => {
-      const hashActual = await bcrypt.hash('ActualCorrecta1', 10);
-      queryBuilderMock.getOne.mockResolvedValue({ contrasena: hashActual });
-
-      await expect(
-        service.updateSelf(UUID_USUARIO, {
-          contrasenaActual: 'Incorrecta',
-          nuevaContrasena: 'Nueva12345',
-        }),
-      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
-    });
-
-    it('cambia la contraseña si la actual coincide (reusa cambiarContrasena)', async () => {
-      const hashActual = await bcrypt.hash('ActualCorrecta1', 10);
-      queryBuilderMock.getOne.mockResolvedValue({ contrasena: hashActual });
-      usuarioRepository.findOne.mockResolvedValue({
-        idUsuario: UUID_USUARIO,
-        nombre: 'Estudiante',
-        correo: 'estudiante@usantoto.edu.co',
-        rol: rolEstudiante,
-      });
-
-      await service.updateSelf(UUID_USUARIO, {
-        contrasenaActual: 'ActualCorrecta1',
-        nuevaContrasena: 'Nueva12345',
-      });
-
-      expect(queryBuilderMock.update).toHaveBeenCalledWith(Usuario);
-      expect(queryBuilderMock.set).toHaveBeenCalledWith(
-        expect.objectContaining({ tokenVersion: expect.any(Function) }),
-      );
-      expect(queryBuilderMock.execute).toHaveBeenCalled();
-    });
-  });
-});
-
-describe('UpdateMeDto', () => {
-  it('rechaza cualquier intento de incluir correo (whitelist + forbidNonWhitelisted, ver src/main.ts)', async () => {
-    const instancia = plainToInstance(UpdateMeDto, {
-      nombre: 'Nombre Nuevo',
-      correo: 'otro@usantoto.edu.co',
-    });
-
-    const errores = await validate(instancia, {
-      whitelist: true,
-      forbidNonWhitelisted: true,
-    });
-
-    expect(
-      errores.some(
-        (error) =>
-          error.property === 'correo' && error.constraints?.whitelistValidation,
-      ),
-    ).toBe(true);
-  });
-
-  it('rechaza cualquier intento de incluir idRol (autoedición nunca cambia el rol)', async () => {
-    const instancia = plainToInstance(UpdateMeDto, {
-      idRol: 'b1f0c1d2-1111-4a2b-9c3d-000000000001',
-    });
-
-    const errores = await validate(instancia, {
-      whitelist: true,
-      forbidNonWhitelisted: true,
-    });
-
-    expect(
-      errores.some(
-        (error) =>
-          error.property === 'idRol' && error.constraints?.whitelistValidation,
-      ),
-    ).toBe(true);
-  });
-
-  it('acepta nombre/contrasenaActual/nuevaContrasena sin errores', async () => {
-    const instancia = plainToInstance(UpdateMeDto, {
-      nombre: 'Nombre Nuevo',
-    });
-
-    const errores = await validate(instancia, {
-      whitelist: true,
-      forbidNonWhitelisted: true,
-    });
-
-    expect(errores).toHaveLength(0);
   });
 });

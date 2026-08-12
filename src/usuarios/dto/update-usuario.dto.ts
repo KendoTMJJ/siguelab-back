@@ -3,9 +3,8 @@ import { CreateUsuarioDto } from './create-usuario.dto';
 
 /**
  * PATCH /usuarios/:id — exclusivo del admin (ver @Roles en el controller):
- * puede editar cualquier campo de cualquier usuario, incluido el correo.
- * La restricción de "no se puede cambiar el correo" aplica solo a la
- * autoedición (PATCH /auth/me, ver UpdateMeDto) — el admin gestionando
- * OTROS usuarios sí necesita poder corregir un correo mal escrito.
+ * puede editar nombre/correo/rol de cualquier usuario. Nunca incluye
+ * contraseña ni oid: la identidad la resuelve Entra ID en cada login (ver
+ * JwtStrategy.validate / UsuariosService.findOrCreateByOid).
  */
 export class UpdateUsuarioDto extends PartialType(CreateUsuarioDto) {}

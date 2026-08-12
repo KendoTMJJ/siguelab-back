@@ -8,5 +8,7 @@ export const corsConfig: CorsOptions = {
   // (:4200 -> :3000) — necesario para que el front lea el nombre real del
   // archivo al descargar (ver ReportesService.descargarAsistenciasLaboratorios).
   exposedHeaders: ['Content-Disposition'],
-  credentials: true,
+  // Sin cookies: la identidad viaja por header Authorization (token de
+  // Entra), no hay nada que el navegador necesite enviar con credenciales.
+  credentials: false,
 };

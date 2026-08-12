@@ -9,11 +9,6 @@ export class ThrottlerCustomGuard extends ThrottlerGuard {
       return `user-${req.user.id}`;
     }
 
-    const correo = req.body?.correo;
-    if (correo) {
-      return `correo-${String(correo).toLowerCase().trim()}`;
-    }
-
     return req.ip;
   }
 }

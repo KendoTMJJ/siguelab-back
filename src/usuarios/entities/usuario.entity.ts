@@ -29,8 +29,27 @@ export class Usuario {
   @Column({ length: 150, unique: true })
   correo!: string;
 
-  @Column({ length: 255, select: false })
-  contrasena!: string;
+  /**
+   * Identificador estable de Microsoft Entra ID (claim `oid` del token).
+   * Nullable: un admin puede pre-crear el usuario por correo (para poder
+   * asignarle rol de entrada) antes de que esa persona inicie sesión por
+   * primera vez — el `oid` se enlaza automáticamente en su primer login
+   * (ver UsuariosService.findOrCreateByOid).
+   */
+  @Column({ type: 'varchar', length: 100, unique: true, nullable: true })
+  oid?: string | null;
+
+  /**
+   * Cargo y facultad del directorio institucional (jobTitle/department en
+   * Microsoft Graph). El backend nunca llama a Graph: el frontend los trae
+   * con un token de scope User.Read y los sincroniza vía PATCH /directorio/me
+   * (ver DirectorioModule) — así este backend no necesita client secret.
+   */
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  cargo?: string | null;
+
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  facultad?: string | null;
 
   @Column({
     type: 'enum',
@@ -38,18 +57,6 @@ export class Usuario {
     default: EstadoUsuario.ACTIVO,
   })
   estado!: EstadoUsuario;
-
-  @Column({ name: 'correo_verificado', default: false })
-  correoVerificado!: boolean;
-
-  @Column({ name: 'intentos_fallidos', default: 0 })
-  intentosFallidos!: number;
-
-  @Column({ name: 'bloqueado_hasta', type: 'timestamp', nullable: true })
-  bloqueadoHasta!: Date | null;
-
-  @Column({ name: 'token_version', default: 0 })
-  tokenVersion!: number;
 
   @CreateDateColumn({ name: 'fecha_registro' })
   fechaRegistro!: Date;

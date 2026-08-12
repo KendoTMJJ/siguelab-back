@@ -1,11 +1,11 @@
-import {
-  IsEmail,
-  IsNotEmpty,
-  IsString,
-  IsUUID,
-  MinLength,
-} from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, IsUUID } from 'class-validator';
 
+/**
+ * El admin pre-crea usuarios por correo (típicamente para dejarles un rol
+ * distinto al de estudiante desde ya). Sin contraseña: la identidad la
+ * valida Entra ID; el `oid` se enlaza solo en el primer login de esa
+ * persona (ver UsuariosService.findOrCreateByOid).
+ */
 export class CreateUsuarioDto {
   @IsUUID()
   idRol!: string;
@@ -16,8 +16,4 @@ export class CreateUsuarioDto {
 
   @IsEmail()
   correo!: string;
-
-  @IsString()
-  @MinLength(8)
-  contrasena!: string;
 }
