@@ -116,31 +116,6 @@ describe('UsuariosService', () => {
     });
   });
 
-  describe('create', () => {
-    const dto = {
-      idRol: UUID_ROL,
-      nombre: 'Docente Nuevo',
-      correo: 'docente@usantoto.edu.co',
-    };
-
-    it('lanza CONFLICT si el correo ya está registrado', async () => {
-      usuarioRepository.findOne.mockResolvedValue({ idUsuario: UUID_USUARIO });
-
-      await expect(service.create(dto)).rejects.toMatchObject({
-        status: HttpStatus.CONFLICT,
-      });
-    });
-
-    it('crea el usuario sin oid (pendiente de su primer login)', async () => {
-      usuarioRepository.findOne.mockResolvedValue(null);
-
-      const usuario = await service.create(dto);
-
-      expect(usuario.oid).toBeUndefined();
-      expect(usuario.correo).toBe(dto.correo);
-    });
-  });
-
   describe('findOne', () => {
     it('lanza NOT_FOUND si el usuario no existe', async () => {
       usuarioRepository.findOne.mockResolvedValue(null);
@@ -159,41 +134,35 @@ describe('UsuariosService', () => {
   });
 
   describe('update', () => {
-    it('actualiza nombre/rol sin tocar el correo existente', async () => {
+    const OTRO_UUID_ROL = 'b1f0c1d2-1111-4a2b-9c3d-000000000099';
+
+    it('cambia solo el rol, sin tocar nombre ni correo', async () => {
       const usuarioExistente = {
         idUsuario: UUID_USUARIO,
-        nombre: 'Nombre Viejo',
+        nombre: 'Nombre Institucional',
         correo: 'original@usantoto.edu.co',
         estado: EstadoUsuario.ACTIVO,
+        rol: rolEstudiante,
       };
       usuarioRepository.findOne.mockResolvedValue(usuarioExistente);
 
       const actualizado = await service.update(UUID_USUARIO, {
-        nombre: 'Nombre Nuevo',
+        idRol: OTRO_UUID_ROL,
       });
 
       expect(actualizado).toMatchObject({
-        nombre: 'Nombre Nuevo',
+        nombre: 'Nombre Institucional',
         correo: 'original@usantoto.edu.co',
+        rol: { idRol: OTRO_UUID_ROL },
       });
     });
 
-    it('el admin sí puede corregir el correo de otro usuario', async () => {
-      const usuarioExistente = {
-        idUsuario: UUID_USUARIO,
-        nombre: 'Nombre Viejo',
-        correo: 'viejo@usantoto.edu.co',
-        estado: EstadoUsuario.ACTIVO,
-      };
-      usuarioRepository.findOne.mockResolvedValue(usuarioExistente);
+    it('lanza NOT_FOUND si el usuario no existe', async () => {
+      usuarioRepository.findOne.mockResolvedValue(null);
 
-      const actualizado = await service.update(UUID_USUARIO, {
-        correo: 'corregido@usantoto.edu.co',
-      });
-
-      expect(actualizado).toMatchObject({
-        correo: 'corregido@usantoto.edu.co',
-      });
+      await expect(
+        service.update('id-que-no-existe', { idRol: OTRO_UUID_ROL }),
+      ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
     });
   });
 });

@@ -1,6 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
-import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
 import { Rol } from 'src/roles/entities/rol.entity';
 import { Usuario } from './entities/usuario.entity';
@@ -111,35 +110,6 @@ export class UsuariosService {
     return this.usuarioRepository.save(usuario);
   }
 
-  async create(createUsuarioDto: CreateUsuarioDto): Promise<Usuario> {
-    try {
-      const existente = await this.usuarioRepository.findOne({
-        where: { correo: createUsuarioDto.correo },
-      });
-
-      if (existente) {
-        throw new HttpException(
-          'El correo ya está registrado',
-          HttpStatus.CONFLICT,
-        );
-      }
-
-      const { idRol, ...rest } = createUsuarioDto;
-      const usuario = this.usuarioRepository.create({
-        ...rest,
-        rol: { idRol } as Usuario['rol'],
-      });
-
-      return await this.usuarioRepository.save(usuario);
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        'Error al crear el usuario',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
   /**
    * Único punto de entrada para listar usuarios — paginado siempre (ver
    * PaginationParams: nunca "sin límite"). `buscar` reemplaza al antiguo
@@ -188,16 +158,15 @@ export class UsuariosService {
     return usuario;
   }
 
+  /** Lo único editable es el rol (ver UpdateUsuarioDto): nombre/correo los
+   * gobierna Entra ID en cada login. */
   async update(
     id: string,
     updateUsuarioDto: UpdateUsuarioDto,
   ): Promise<Usuario> {
     try {
       const usuario = await this.findOne(id);
-      const { idRol, ...rest } = updateUsuarioDto;
-
-      Object.assign(usuario, rest);
-      if (idRol !== undefined) usuario.rol = { idRol } as Usuario['rol'];
+      usuario.rol = { idRol: updateUsuarioDto.idRol } as Usuario['rol'];
 
       return await this.usuarioRepository.save(usuario);
     } catch (error) {
