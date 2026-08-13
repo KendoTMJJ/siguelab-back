@@ -32,12 +32,12 @@ jobs:
       DB_USER: sigelab
       DB_PASSWORD: sigelab
       DB_NAME: sigelab_test
-      JWT_SECRET: test-secret-ci
       FRONTEND_URL: http://localhost:5173
-      ALLOWED_EMAIL_DOMAINS: usantoto.edu.co,ustatunja.edu.co
+      TENANT_ID: 03749b3c-b1c4-446c-b754-fc9b8b97b5d7
+      API_CLIENT_ID: e591619d-fe79-43c4-8649-b65be92bd3e8
+      API_APPLICATION_ID_URI: api://e591619d-fe79-43c4-8649-b65be92bd3e8
       SEED_ADMIN_NAME: Administrador
       SEED_ADMIN_EMAIL: admin@sigelab.local
-      SEED_ADMIN_PASSWORD: TestAdmin123!
 
     steps:
       - name: Checkout code

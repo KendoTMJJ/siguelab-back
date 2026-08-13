@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Post,
   Body,
   Patch,
   Param,
@@ -10,21 +9,20 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { UsuariosService } from './usuarios.service';
-import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
 import { Roles } from 'src/auth/jwt/roles.decorator';
 import { resolvePagination } from 'src/common/pagination/pagination.util';
 
+/**
+ * No hay endpoint de creación: los usuarios se dan de alta solos en su
+ * primer login con Microsoft (ver UsuariosService.findOrCreateByOid). El
+ * admin solo puede listar, ver, cambiar el rol y eliminar.
+ */
 @ApiTags('usuarios')
 @Roles('admin')
 @Controller('usuarios')
 export class UsuariosController {
   constructor(private readonly usuariosService: UsuariosService) {}
-
-  @Post()
-  create(@Body() createUsuarioDto: CreateUsuarioDto) {
-    return this.usuariosService.create(createUsuarioDto);
-  }
 
   @Get()
   @ApiQuery({ name: 'page', required: false, type: Number })

@@ -32,6 +32,8 @@ describe('BitacoraService', () => {
     nombre: 'Laboratorista Uno',
     correo: 'laboratorista@usantoto.edu.co',
     rol: 'laboratorista',
+    cargo: null,
+    facultad: null,
   };
 
   const laboratorioBase: Partial<Laboratorio> = { idLaboratorio: 1 };

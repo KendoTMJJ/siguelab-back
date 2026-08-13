@@ -6,6 +6,7 @@ import { ConectionModule } from './config/conection/conection.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { RolesModule } from './roles/roles.module';
 import { AuthModule } from './auth/auth.module';
+import { DirectorioModule } from './directorio/directorio.module';
 import { CatalogosModule } from './catalogos/catalogos.module';
 import { LaboratoriosModule } from './laboratorios/laboratorios.module';
 import { HorariosAcademicosModule } from './horarios-academicos/horarios-academicos.module';
@@ -33,6 +34,7 @@ import { ThrottlerCustomGuard } from './auth/jwt/throttler-custom.guard';
     UsuariosModule,
     RolesModule,
     AuthModule,
+    DirectorioModule,
     CatalogosModule,
     LaboratoriosModule,
     HorariosAcademicosModule,

@@ -1,11 +1,16 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { CreateUsuarioDto } from './create-usuario.dto';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsUUID } from 'class-validator';
 
 /**
  * PATCH /usuarios/:id — exclusivo del admin (ver @Roles en el controller):
- * puede editar cualquier campo de cualquier usuario, incluido el correo.
- * La restricción de "no se puede cambiar el correo" aplica solo a la
- * autoedición (PATCH /auth/me, ver UpdateMeDto) — el admin gestionando
- * OTROS usuarios sí necesita poder corregir un correo mal escrito.
+ * lo ÚNICO editable es el rol. El nombre y el correo los resuelve Entra ID
+ * en cada login (ver JwtStrategy.validate / UsuariosService.findOrCreateByOid),
+ * así que editarlos aquí no tendría efecto — el próximo login los
+ * sobrescribiría. Con `forbidNonWhitelisted: true` global (src/main.ts),
+ * mandar nombre/correo en el body hace que la petición se rechace con 400.
  */
-export class UpdateUsuarioDto extends PartialType(CreateUsuarioDto) {}
+export class UpdateUsuarioDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  idRol!: string;
+}
