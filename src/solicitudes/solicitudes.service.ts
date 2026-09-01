@@ -1,14 +1,16 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource, In, Repository, SelectQueryBuilder } from 'typeorm';
 import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorator';
 import {
   PaginatedResult,
   buildPaginatedResult,
 } from 'src/common/pagination/paginated-result.interface';
 import { PaginationParams } from 'src/common/pagination/pagination.util';
+import { hoyBogota } from 'src/common/utils/fecha-horario.util';
 import {
   Laboratorio,
   EstadoLaboratorio,
+  ModoReservaLaboratorio,
 } from 'src/laboratorios/entities/laboratorio.entity';
 import { EspacioAcademico } from 'src/catalogos/entities/espacio-academico.entity';
 import { EspacioLaboratorio } from 'src/laboratorios/entities/espacio-laboratorio.entity';
@@ -212,8 +214,11 @@ export class SolicitudesService {
       .leftJoinAndSelect('solicitud.tipoReserva', 'tipoReserva')
       .where('solicitud.id_laboratorio = :idLaboratorio', { idLaboratorio })
       .andWhere('solicitud.fecha_practica = :fecha', { fecha: fechaPractica })
-      .andWhere('solicitud.estado = :estado', {
-        estado: EstadoSolicitud.APROBADA,
+      // REALIZADA cuenta igual que APROBADA acá: la franja ya se usó, así
+      // que sigue ocupada para efectos de cruce — solo cambió porque el
+      // laboratorista ya registró bitácora, no porque el horario se liberó.
+      .andWhere('solicitud.estado IN (:...estados)', {
+        estados: [EstadoSolicitud.APROBADA, EstadoSolicitud.REALIZADA],
       });
 
     if (idSolicitudExcluir) {
@@ -259,34 +264,36 @@ export class SolicitudesService {
       params.idSolicitudExcluir,
     );
 
-    if (aprobadasQueCruzan.length === 0) {
-      return { disponible: true };
+    if (aprobadasQueCruzan.length > 0) {
+      if (params.esExclusiva) {
+        return {
+          disponible: false,
+          motivo:
+            'Este tipo de reserva es exclusivo (como Docencia) y exige el laboratorio ' +
+            'completamente libre en ese horario, sin compartir aforo con otras reservas. ' +
+            'Ya existe una reserva aprobada que cruza este horario — elige otro horario ' +
+            'o laboratorio',
+        };
+      }
+
+      const hayExclusivaQueCruza = aprobadasQueCruzan.some(
+        (s) => s.tipoReserva.esExclusiva,
+      );
+      if (hayExclusivaQueCruza) {
+        return {
+          disponible: false,
+          motivo:
+            'Ya existe una reserva exclusiva aprobada (como Docencia) que cruza este ' +
+            'horario — ese tipo bloquea el laboratorio completo, sin dejar aforo ' +
+            'compartido disponible',
+        };
+      }
     }
 
-    if (params.esExclusiva) {
-      return {
-        disponible: false,
-        motivo:
-          'Este tipo de reserva es exclusivo (como Docencia) y exige el laboratorio ' +
-          'completamente libre en ese horario, sin compartir aforo con otras reservas. ' +
-          'Ya existe una reserva aprobada que cruza este horario — elige otro horario ' +
-          'o laboratorio',
-      };
-    }
-
-    const hayExclusivaQueCruza = aprobadasQueCruzan.some(
-      (s) => s.tipoReserva.esExclusiva,
-    );
-    if (hayExclusivaQueCruza) {
-      return {
-        disponible: false,
-        motivo:
-          'Ya existe una reserva exclusiva aprobada (como Docencia) que cruza este ' +
-          'horario — ese tipo bloquea el laboratorio completo, sin dejar aforo ' +
-          'compartido disponible',
-      };
-    }
-
+    // Antes esto solo corría si ya había otra solicitud aprobada cruzando el
+    // horario (aprobadasQueCruzan.length > 0) — si esta era la PRIMERA
+    // reserva de la franja, el chequeo de aforo se saltaba entero y
+    // numPersonas pasaba sin tope real contra la capacidad del laboratorio.
     const cuposOcupados = aprobadasQueCruzan.reduce(
       (total, s) => total + this.consumoCupos(s.numPersonas),
       0,
@@ -354,24 +361,37 @@ export class SolicitudesService {
       );
     }
 
-    const espacio = await this.espacioAcademicoRepository.findOne({
-      where: { idEspacio: dto.idEspacio },
-    });
-    if (!espacio) {
-      throw new HttpException(
-        'Espacio académico no encontrado',
-        HttpStatus.NOT_FOUND,
-      );
-    }
+    // Solo los tipos con requiereEspacio = true (hoy, únicamente "Docencia")
+    // necesitan un espacio académico asociado al laboratorio — exigirlo para
+    // TODOS los tipos bloqueaba cualquier reserva (incluso "Práctica libre",
+    // "CAU", etc.) en un laboratorio que no tuviera ningún espacio académico
+    // asociado, sin que eso tuviera nada que ver con el tipo de reserva pedido.
+    if (tipoReserva.requiereEspacio) {
+      if (!dto.idEspacio) {
+        throw new HttpException(
+          'Este tipo de reserva requiere indicar un espacio académico',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const espacio = await this.espacioAcademicoRepository.findOne({
+        where: { idEspacio: dto.idEspacio },
+      });
+      if (!espacio) {
+        throw new HttpException(
+          'Espacio académico no encontrado',
+          HttpStatus.NOT_FOUND,
+        );
+      }
 
-    const espacioAsociado = await this.espacioLaboratorioRepository.exists({
-      where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
-    });
-    if (!espacioAsociado) {
-      throw new HttpException(
-        'El laboratorio elegido no está asociado a ese espacio académico',
-        HttpStatus.BAD_REQUEST,
-      );
+      const espacioAsociado = await this.espacioLaboratorioRepository.exists({
+        where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
+      });
+      if (!espacioAsociado) {
+        throw new HttpException(
+          'El laboratorio elegido no está asociado a ese espacio académico',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
     }
 
     const docenteAsociado = await this.docenteLaboratorioRepository.exists({
@@ -400,6 +420,12 @@ export class SolicitudesService {
       throw new HttpException(
         'El laboratorio está inactivo',
         HttpStatus.CONFLICT,
+      );
+    }
+    if (laboratorio.modoReserva !== ModoReservaLaboratorio.ESTANDAR) {
+      throw new HttpException(
+        'Este laboratorio no admite solicitudes de reserva (no está en modo estándar)',
+        HttpStatus.BAD_REQUEST,
       );
     }
 
@@ -445,8 +471,7 @@ export class SolicitudesService {
     }
 
     const antelacionDias = Number(process.env.RESERVA_ANTELACION_DIAS ?? 3);
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     const minimaFecha = new Date(hoy);
     minimaFecha.setUTCDate(minimaFecha.getUTCDate() + antelacionDias);
     if (new Date(`${dto.fechaPractica}T00:00:00Z`) < minimaFecha) {
@@ -465,7 +490,9 @@ export class SolicitudesService {
 
     const disponibilidad = await this.verificarDisponibilidad({
       idLaboratorio: dto.idLaboratorio,
-      capacidadLaboratorio: laboratorio.capacidad,
+      // No-null: garantizado por el guard de modoReserva === ESTANDAR en create/crearDirecta,
+      // y una solicitud solo puede referenciar un laboratorio que ya era estándar al crearse.
+      capacidadLaboratorio: laboratorio.capacidad ?? 0,
       fechaPractica: dto.fechaPractica,
       horaInicio: dto.horaInicio,
       horaFin: dto.horaFin,
@@ -595,24 +622,34 @@ export class SolicitudesService {
       );
     }
 
-    const espacio = await this.espacioAcademicoRepository.findOne({
-      where: { idEspacio: dto.idEspacio },
-    });
-    if (!espacio) {
-      throw new HttpException(
-        'Espacio académico no encontrado',
-        HttpStatus.NOT_FOUND,
-      );
-    }
+    // Ver comentario equivalente en create(): solo los tipos con
+    // requiereEspacio = true necesitan un espacio académico asociado.
+    if (tipoReserva.requiereEspacio) {
+      if (!dto.idEspacio) {
+        throw new HttpException(
+          'Este tipo de reserva requiere indicar un espacio académico',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const espacio = await this.espacioAcademicoRepository.findOne({
+        where: { idEspacio: dto.idEspacio },
+      });
+      if (!espacio) {
+        throw new HttpException(
+          'Espacio académico no encontrado',
+          HttpStatus.NOT_FOUND,
+        );
+      }
 
-    const espacioAsociado = await this.espacioLaboratorioRepository.exists({
-      where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
-    });
-    if (!espacioAsociado) {
-      throw new HttpException(
-        'El laboratorio elegido no está asociado a ese espacio académico',
-        HttpStatus.BAD_REQUEST,
-      );
+      const espacioAsociado = await this.espacioLaboratorioRepository.exists({
+        where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
+      });
+      if (!espacioAsociado) {
+        throw new HttpException(
+          'El laboratorio elegido no está asociado a ese espacio académico',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
     }
 
     const docenteAsociado = await this.docenteLaboratorioRepository.exists({
@@ -641,6 +678,12 @@ export class SolicitudesService {
       throw new HttpException(
         'El laboratorio está inactivo',
         HttpStatus.CONFLICT,
+      );
+    }
+    if (laboratorio.modoReserva !== ModoReservaLaboratorio.ESTANDAR) {
+      throw new HttpException(
+        'Este laboratorio no admite solicitudes de reserva (no está en modo estándar)',
+        HttpStatus.BAD_REQUEST,
       );
     }
 
@@ -686,8 +729,7 @@ export class SolicitudesService {
       );
     }
 
-    const hoy = new Date();
-    hoy.setUTCHours(0, 0, 0, 0);
+    const hoy = hoyBogota();
     if (new Date(`${dto.fechaPractica}T00:00:00Z`) < hoy) {
       throw new HttpException(
         'La fecha de práctica no puede ser en el pasado',
@@ -704,7 +746,9 @@ export class SolicitudesService {
 
     const disponibilidad = await this.verificarDisponibilidad({
       idLaboratorio: dto.idLaboratorio,
-      capacidadLaboratorio: laboratorio.capacidad,
+      // No-null: garantizado por el guard de modoReserva === ESTANDAR en create/crearDirecta,
+      // y una solicitud solo puede referenciar un laboratorio que ya era estándar al crearse.
+      capacidadLaboratorio: laboratorio.capacidad ?? 0,
       fechaPractica: dto.fechaPractica,
       horaInicio: dto.horaInicio,
       horaFin: dto.horaFin,
@@ -918,7 +962,9 @@ export class SolicitudesService {
 
       const disponibilidad = await this.verificarDisponibilidad({
         idLaboratorio: solicitud.idLaboratorio,
-        capacidadLaboratorio: laboratorio.capacidad,
+        // No-null: garantizado por el guard de modoReserva === ESTANDAR en create/crearDirecta,
+        // y una solicitud solo puede referenciar un laboratorio que ya era estándar al crearse.
+        capacidadLaboratorio: laboratorio.capacidad ?? 0,
         fechaPractica: solicitud.fechaPractica,
         horaInicio: solicitud.horaInicio,
         horaFin: solicitud.horaFin,
@@ -1184,14 +1230,154 @@ export class SolicitudesService {
     return actualizada;
   }
 
+  /**
+   * Cierra el flujo: lo llama BitacoraService.create justo después de
+   * registrar el uso real de una solicitud aprobada — sin esto, una
+   * solicitud aprobada se quedaba en ese estado para siempre, sin ningún
+   * indicio de que la práctica ya ocurrió. No valida el estado actual (ya
+   * lo valida BitacoraService antes de dejar registrar bitácora) ni lanza
+   * si algo falla en el camino — un problema acá no debe tumbar el registro
+   * de bitácora que sí se guardó.
+   */
+  async marcarRealizada(idSolicitud: number, idActor: string): Promise<void> {
+    try {
+      await this.solicitudRepository.update(
+        { idSolicitud },
+        { estado: EstadoSolicitud.REALIZADA },
+      );
+      await this.registrarEvento(
+        idSolicitud,
+        TipoEventoSolicitud.REALIZADA,
+        idActor,
+      );
+    } catch (error) {
+      console.error('No se pudo marcar la solicitud como realizada', error);
+    }
+  }
+
   // ───────────────────────── lecturas ─────────────────────────
 
-  async findMias(usuario: AuthenticatedUser): Promise<SolicitudReserva[]> {
-    return this.solicitudRepository.find({
-      where: { idSolicitante: usuario.id },
-      relations: { firmas: true, eventos: true },
-      order: { fechaCreacion: 'DESC', eventos: { fecha: 'ASC' } },
+  /**
+   * Modo dual: sin `pagination` devuelve el arreglo completo (lo usa Inicio
+   * para calcular los contadores del dashboard, que necesitan el total real,
+   * no una página); con `pagination` devuelve `PaginatedResult`, para "Mis
+   * solicitudes". `skip`/`take` van por `find()` (no createQueryBuilder) a
+   * propósito: con relaciones one-to-many (firmas/eventos) un JOIN manual
+   * aplicaría el LIMIT/OFFSET sobre las filas ya combinadas, cortando a mitad
+   * de una solicitud — el repositorio resuelve cada relación aparte.
+   */
+  findMias(
+    usuario: AuthenticatedUser,
+    archivadas?: boolean,
+  ): Promise<SolicitudReserva[]>;
+  findMias(
+    usuario: AuthenticatedUser,
+    archivadas: boolean,
+    pagination: PaginationParams,
+  ): Promise<PaginatedResult<SolicitudReserva>>;
+  async findMias(
+    usuario: AuthenticatedUser,
+    archivadas = false,
+    pagination?: PaginationParams,
+  ): Promise<SolicitudReserva[] | PaginatedResult<SolicitudReserva>> {
+    const where = {
+      idSolicitante: usuario.id,
+      archivada: archivadas,
+      eliminada: false,
+    };
+    const relations = { firmas: true, eventos: true };
+    const order = {
+      fechaCreacion: 'DESC' as const,
+      eventos: { fecha: 'ASC' as const },
+    };
+
+    if (!pagination) {
+      return this.solicitudRepository.find({ where, relations, order });
+    }
+
+    const [data, total] = await this.solicitudRepository.findAndCount({
+      where,
+      relations,
+      order,
+      skip: pagination.skip,
+      take: pagination.take,
     });
+    return buildPaginatedResult(data, total, pagination.page, pagination.limit);
+  }
+
+  /** Solo el solicitante, y solo si ya quedó resuelta (rechazada/cancelada)
+   * — una vez archivada desaparece de findMias pero sigue existiendo para
+   * Historial/Estadísticas/auditoría, que no filtran por esta bandera. */
+  async archivar(
+    id: number,
+    usuario: AuthenticatedUser,
+  ): Promise<SolicitudReserva> {
+    const solicitud = await this.solicitudRepository.findOne({
+      where: { idSolicitud: id },
+    });
+    if (!solicitud) {
+      throw new HttpException('Solicitud no encontrada', HttpStatus.NOT_FOUND);
+    }
+    if (solicitud.idSolicitante !== usuario.id) {
+      throw new HttpException(
+        'Solo el solicitante puede archivar su solicitud',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const ESTADOS_ARCHIVABLES = [
+      EstadoSolicitud.RECHAZADA,
+      EstadoSolicitud.CANCELADA,
+      EstadoSolicitud.REALIZADA,
+    ];
+    if (!ESTADOS_ARCHIVABLES.includes(solicitud.estado)) {
+      throw new HttpException(
+        `No se puede archivar una solicitud en estado "${solicitud.estado}"`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    await this.solicitudRepository.update(
+      { idSolicitud: id },
+      { archivada: true },
+    );
+    return { ...solicitud, archivada: true };
+  }
+
+  /** Vuelve a mostrarla en Mis Solicitudes — sin restricción de estado, ya
+   * que archivar tampoco cambia el estado, solo la visibilidad. */
+  async desarchivar(
+    id: number,
+    usuario: AuthenticatedUser,
+  ): Promise<SolicitudReserva> {
+    const solicitud = await this.solicitudRepository.findOne({
+      where: { idSolicitud: id },
+    });
+    if (!solicitud) {
+      throw new HttpException('Solicitud no encontrada', HttpStatus.NOT_FOUND);
+    }
+    if (solicitud.idSolicitante !== usuario.id) {
+      throw new HttpException(
+        'Solo el solicitante puede restaurar su solicitud',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    await this.solicitudRepository.update(
+      { idSolicitud: id },
+      { archivada: false },
+    );
+    return { ...solicitud, archivada: false };
+  }
+
+  /** Soft delete de TODAS las solicitudes archivadas del usuario — las saca
+   * de Mis Solicitudes para siempre (ni activas ni archivadas). No toca
+   * firma/solicitud_evento/notificacion ni las filas en sí: Historial y
+   * Estadísticas no filtran por `eliminada`, así que el rastro de auditoría
+   * para admin/laboratorista sigue intacto (ver comentario en la entidad). */
+  async vaciarArchivadas(usuario: AuthenticatedUser): Promise<number> {
+    const resultado = await this.solicitudRepository.update(
+      { idSolicitante: usuario.id, archivada: true },
+      { eliminada: true },
+    );
+    return resultado.affected ?? 0;
   }
 
   /**
@@ -1340,7 +1526,7 @@ export class SolicitudesService {
       // que el orden natural de un feed. Mismo criterio de
       // "MAX(solicitud_evento.fecha)" que ya usan findPendientesDeMiFirma
       // (bandeja) y BitacoraService.pendientesPorRegistrar, solo que DESC
-      // en vez de ASC — acá interesa ver lo más reciente primero, no lo que
+      // en vez de ASC — aquí interesa ver lo más reciente primero, no lo que
       // lleva más tiempo esperando.
       .orderBy(
         '(SELECT MAX(ev.fecha) FROM solicitud_evento ev WHERE ev.id_solicitud = solicitud.id_solicitud)',
@@ -1383,11 +1569,11 @@ export class SolicitudesService {
       .where('solicitud.idSolicitud IN (:...ids)', { ids })
       .getMany();
 
-    // Sin orderBy acá a propósito: esta versión de TypeORM no soporta un
+    // Sin orderBy aquí a propósito: esta versión de TypeORM no soporta un
     // ORDER BY con subconsulta SQL cruda en una query que hidrata entidades
     // con joins 1-a-N (falla con "alias was not found" — ver
     // createOrderByCombinedWithSelectExpression). El orden real ya lo dio
-    // idQuery (arriba, con getRawMany — ahí sí funciona), así que acá solo
+    // idQuery (arriba, con getRawMany — ahí sí funciona), así que aquí solo
     // se reordena en JS según la posición de cada id en `ids`.
     const posicion = new Map(ids.map((id, indice) => [id, indice]));
     data.sort(
@@ -1406,6 +1592,12 @@ export class SolicitudesService {
       query.andWhere('solicitud.id_docente_encargado = :idDocente', {
         idDocente: usuario.id,
       });
+    }
+    if (usuario.rol === 'laboratorista') {
+      query.andWhere(
+        'EXISTS (SELECT 1 FROM firma f WHERE f.id_solicitud = solicitud.id_solicitud AND f.id_firmante = :idLaboratorista)',
+        { idLaboratorista: usuario.id },
+      );
     }
 
     if (filtros.estado) {
@@ -1494,7 +1686,9 @@ export class SolicitudesService {
       where: {
         idLaboratorio,
         fechaPractica: fecha,
-        estado: EstadoSolicitud.APROBADA,
+        // Igual criterio que solicitudesAprobadasQueCruzan: una solicitud ya
+        // REALIZADA sigue ocupando su franja en el calendario del día.
+        estado: In([EstadoSolicitud.APROBADA, EstadoSolicitud.REALIZADA]),
       },
       relations: { tipoReserva: true },
     });
@@ -1508,7 +1702,7 @@ export class SolicitudesService {
       nombrePractica: s.nombrePractica,
       ...(!s.tipoReserva.esExclusiva && {
         cuposOcupados: this.consumoCupos(s.numPersonas),
-        capacidad: laboratorio.capacidad,
+        capacidad: laboratorio.capacidad ?? undefined,
       }),
     }));
 

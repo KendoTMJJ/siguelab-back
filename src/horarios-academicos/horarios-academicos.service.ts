@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
+import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorator';
 import { Laboratorio } from 'src/laboratorios/entities/laboratorio.entity';
 import { EspacioLaboratorio } from 'src/laboratorios/entities/espacio-laboratorio.entity';
 import { DocenteLaboratorio } from 'src/laboratorios/entities/docente-laboratorio.entity';
@@ -158,6 +159,7 @@ export class HorariosAcademicosService {
 
   async create(
     createHorarioAcademicoDto: CreateHorarioAcademicoDto,
+    usuario: AuthenticatedUser,
   ): Promise<HorarioAcademico> {
     this.validarRangoHoras(
       createHorarioAcademicoDto.horaInicio,
@@ -183,7 +185,10 @@ export class HorariosAcademicosService {
     }
 
     try {
-      const horario = this.horarioRepository.create(createHorarioAcademicoDto);
+      const horario = this.horarioRepository.create({
+        ...createHorarioAcademicoDto,
+        idLaboratorista: usuario.id,
+      });
       return await this.horarioRepository.save(horario);
     } catch {
       throw new HttpException(
@@ -193,12 +198,26 @@ export class HorariosAcademicosService {
     }
   }
 
-  findAll(filtros: FiltrosHorarios): Promise<HorarioAcademico[]> {
+  /**
+   * Un laboratorista solo ve los horarios que él mismo cargó — admin ve
+   * todos sin importar quién los cargó. Igual criterio que
+   * BitacoraService.findAll con registro.id_laboratorista.
+   */
+  findAll(
+    filtros: FiltrosHorarios,
+    usuario: AuthenticatedUser,
+  ): Promise<HorarioAcademico[]> {
     const query = this.horarioRepository
       .createQueryBuilder('horario')
       .leftJoinAndSelect('horario.laboratorio', 'laboratorio')
       .leftJoinAndSelect('horario.espacioAcademico', 'espacioAcademico')
       .where('horario.estado = :estado', { estado: EstadoHorario.VIGENTE });
+
+    if (usuario.rol === 'laboratorista') {
+      query.andWhere('horario.id_laboratorista = :idLaboratorista', {
+        idLaboratorista: usuario.id,
+      });
+    }
 
     if (filtros.idLaboratorio) {
       query.andWhere('horario.id_laboratorio = :idLaboratorio', {
@@ -229,7 +248,10 @@ export class HorariosAcademicosService {
       .getMany();
   }
 
-  async findOne(id: number): Promise<HorarioAcademico> {
+  async findOne(
+    id: number,
+    usuario?: AuthenticatedUser,
+  ): Promise<HorarioAcademico> {
     const horario = await this.horarioRepository.findOne({
       where: { idHorario: id },
     });
@@ -239,14 +261,24 @@ export class HorariosAcademicosService {
         HttpStatus.NOT_FOUND,
       );
     }
+    if (
+      usuario?.rol === 'laboratorista' &&
+      horario.idLaboratorista !== usuario.id
+    ) {
+      throw new HttpException(
+        'No tienes acceso a este horario académico',
+        HttpStatus.FORBIDDEN,
+      );
+    }
     return horario;
   }
 
   async update(
     id: number,
     updateHorarioAcademicoDto: UpdateHorarioAcademicoDto,
+    usuario: AuthenticatedUser,
   ): Promise<HorarioAcademico> {
-    const actual = await this.findOne(id);
+    const actual = await this.findOne(id, usuario);
 
     const horaInicio =
       updateHorarioAcademicoDto.horaInicio ?? actual.horaInicio;

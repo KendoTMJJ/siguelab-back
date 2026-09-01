@@ -165,7 +165,8 @@ describe('ReportesService — export de asistencias', () => {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
 
-      expect(workbook.worksheets).toHaveLength(14);
+      expect(workbook.worksheets).toHaveLength(15); // 14 hojas por laboratorio + "Resumen"
+      expect(workbook.getWorksheet('Resumen')).toBeDefined();
       for (const area of AREAS) {
         const worksheet = workbook.getWorksheet(area.hoja);
         expect(worksheet).toBeDefined();
@@ -187,9 +188,8 @@ describe('ReportesService — export de asistencias', () => {
           ENCABEZADOS_COLUMNAS,
         );
 
-        // También vía la fila de encabezado real (A–O), como lo vería Power
-        // Query — el resto de la fila 1 (P en adelante) son las listas
-        // auxiliares Q–W, no parte de la tabla.
+        // También vía la fila de encabezado real (A–O) — ya no hay listas
+        // auxiliares Q–W (se quitaron, no cumplían ninguna función real).
         const encabezados = (worksheet!.getRow(1).values as unknown[]).slice(
           1,
           1 + ENCABEZADOS_COLUMNAS.length,

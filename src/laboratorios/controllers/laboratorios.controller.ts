@@ -22,11 +22,14 @@ import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorat
 import { LaboratoriosService } from '../services/laboratorios.service';
 import { EspaciosLaboratorioService } from '../services/espacios-laboratorio.service';
 import { DocentesLaboratorioService } from '../services/docentes-laboratorio.service';
+import { LaboratoristasLaboratorioService } from '../services/laboratoristas-laboratorio.service';
 import { CreateLaboratorioDto } from '../dto/laboratorio/create-laboratorio.dto';
 import { UpdateLaboratorioDto } from '../dto/laboratorio/update-laboratorio.dto';
 import { CreateEspacioLaboratorioDto } from '../dto/espacio-laboratorio/create-espacio-laboratorio.dto';
 import { CreateDocenteLaboratorioDto } from '../dto/docente-laboratorio/create-docente-laboratorio.dto';
+import { CreateLaboratoristaLaboratorioDto } from '../dto/laboratorista-laboratorio/create-laboratorista-laboratorio.dto';
 import { EstadoLaboratorio } from '../entities/laboratorio.entity';
+import { resolvePagination } from 'src/common/pagination/pagination.util';
 
 @ApiTags('Laboratorios')
 @ApiBearerAuth()
@@ -36,6 +39,7 @@ export class LaboratoriosController {
     private readonly laboratoriosService: LaboratoriosService,
     private readonly espaciosLaboratorioService: EspaciosLaboratorioService,
     private readonly docentesLaboratorioService: DocentesLaboratorioService,
+    private readonly laboratoristasLaboratorioService: LaboratoristasLaboratorioService,
   ) {}
 
   @Post()
@@ -64,6 +68,14 @@ export class LaboratoriosController {
     required: false,
     description: 'Filtra por nombre (contiene, sin distinguir mayúsculas)',
   })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description:
+      'Si se envía (junto con o sin `limit`), la respuesta es { data, meta }. Si se omiten ambos, devuelve el arreglo completo (lo usan los <select> de otras pantallas).',
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiOperation({
     summary:
       'Listar laboratorios (por defecto solo activos; filtros solo surten efecto para admin)',
@@ -75,11 +87,20 @@ export class LaboratoriosController {
     @Query('estado') estado?: EstadoLaboratorio,
     @Query('incluirInactivos') incluirInactivos?: string,
     @Query('buscar') buscar?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.laboratoriosService.findAll(
-      { estado, incluirInactivos: incluirInactivos === 'true', buscar },
-      usuario.rol === 'admin',
-    );
+    const filtros = {
+      estado,
+      incluirInactivos: incluirInactivos === 'true',
+      buscar,
+    };
+    const esAdmin = usuario.rol === 'admin';
+    const pagination =
+      page || limit ? resolvePagination(page, limit) : undefined;
+    return pagination
+      ? this.laboratoriosService.findAll(filtros, esAdmin, pagination)
+      : this.laboratoriosService.findAll(filtros, esAdmin);
   }
 
   @Get(':id')
@@ -190,6 +211,66 @@ export class LaboratoriosController {
     @Param('idUsuario') idUsuario: string,
   ) {
     return this.docentesLaboratorioService.desasociar(id, idUsuario);
+  }
+
+  @Get(':id/laboratoristas-encargados')
+  @ApiOperation({
+    summary:
+      'Listar laboratoristas/analistas a cargo de un laboratorio (trazabilidad, no restringe acceso)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Listado de laboratoristas (id, nombre, correo)',
+  })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 404, description: 'Laboratorio no encontrado' })
+  laboratoristasEncargados(@Param('id', ParseIntPipe) id: number) {
+    return this.laboratoristasLaboratorioService.laboratoristasDeLaboratorio(
+      id,
+    );
+  }
+
+  @Post(':id/laboratoristas-encargados')
+  @Roles('admin')
+  @ApiOperation({
+    summary: 'Asociar un laboratorista a cargo de un laboratorio',
+  })
+  @ApiResponse({ status: 201, description: 'Asociación creada' })
+  @ApiResponse({
+    status: 400,
+    description: 'El usuario no tiene rol laboratorista',
+  })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Rol insuficiente' })
+  @ApiResponse({
+    status: 404,
+    description: 'Laboratorio o usuario no encontrado',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Ya asociado, o laboratorio inactivo',
+  })
+  asociarLaboratorista(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateLaboratoristaLaboratorioDto,
+  ) {
+    return this.laboratoristasLaboratorioService.asociar(id, dto.idUsuario);
+  }
+
+  @Delete(':id/laboratoristas-encargados/:idUsuario')
+  @Roles('admin')
+  @ApiOperation({
+    summary: 'Desasociar un laboratorista a cargo de un laboratorio',
+  })
+  @ApiResponse({ status: 200, description: 'Asociación eliminada' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Rol insuficiente' })
+  @ApiResponse({ status: 404, description: 'Asociación no encontrada' })
+  desasociarLaboratorista(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('idUsuario') idUsuario: string,
+  ) {
+    return this.laboratoristasLaboratorioService.desasociar(id, idUsuario);
   }
 
   @Patch(':id')

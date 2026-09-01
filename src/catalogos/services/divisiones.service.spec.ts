@@ -37,11 +37,23 @@ describe('DivisionesService', () => {
     };
     facultadRepository = { find: jest.fn(), exists: jest.fn() };
 
+    const managerMock = {
+      create: jest.fn((entity, data) => data),
+      save: jest.fn((data) =>
+        Array.isArray(data)
+          ? Promise.resolve(data)
+          : Promise.resolve({ ...divisionBase, ...data }),
+      ),
+    };
+
     const dataSourceMock = {
       getRepository: jest.fn((entity) => {
         if (entity === Facultad) return facultadRepository;
         return divisionRepository;
       }),
+      transaction: jest.fn((cb: (manager: typeof managerMock) => unknown) =>
+        cb(managerMock),
+      ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -58,7 +70,10 @@ describe('DivisionesService', () => {
     it('crea una división con nombre nuevo', async () => {
       divisionRepository.findOne.mockResolvedValue(null);
 
-      const division = await service.create({ nombre: 'Nueva División' });
+      const division = await service.create({
+        nombre: 'Nueva División',
+        facultades: [{ nombre: 'Facultad Nueva' }],
+      });
 
       expect(division.idDivision).toBe(1);
     });
@@ -67,7 +82,10 @@ describe('DivisionesService', () => {
       divisionRepository.findOne.mockResolvedValue(divisionBase);
 
       await expect(
-        service.create({ nombre: 'Arquitectura e Ingenierías' }),
+        service.create({
+          nombre: 'Arquitectura e Ingenierías',
+          facultades: [{ nombre: 'Facultad Nueva' }],
+        }),
       ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
     });
 
@@ -77,6 +95,7 @@ describe('DivisionesService', () => {
 
       const division = await service.create({
         nombre: 'Arquitectura e Ingenierías',
+        facultades: [{ nombre: 'Facultad Nueva' }],
       });
 
       expect(division.idDivision).toBe(1);

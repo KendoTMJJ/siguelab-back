@@ -31,8 +31,14 @@ export async function seedAdmin(dataSource: DataSource): Promise<void> {
 
   const roles = await seedRoles(rolRepository);
 
+  // withDeleted: el índice único de correo no distingue soft-deleted — si no
+  // se busca aquí también entre los eliminados, el INSERT de abajo choca con
+  // esa fila "invisible" y tumba el arranque completo del backend (pasó en
+  // producción: un usuario semilla quedó soft-deleted y el server no volvía
+  // a levantar en ningún restart hasta restaurarlo a mano).
   const existente = await usuarioRepository.findOne({
     where: { correo: String(process.env.SEED_ADMIN_EMAIL) },
+    withDeleted: true,
   });
 
   if (existente) {
@@ -83,8 +89,11 @@ export async function seedUsuariosDemo(dataSource: DataSource): Promise<void> {
   const roles = await seedRoles(rolRepository);
 
   for (const demo of USUARIOS_DEMO) {
+    // Mismo motivo que en seedAdmin: sin withDeleted, un soft-delete previo
+    // queda invisible aquí pero sigue chocando con el índice único al insertar.
     const existente = await usuarioRepository.findOne({
       where: { correo: demo.correo },
+      withDeleted: true,
     });
     if (existente) {
       continue;

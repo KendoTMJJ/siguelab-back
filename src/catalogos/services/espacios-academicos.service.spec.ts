@@ -14,6 +14,15 @@ describe('EspaciosAcademicosService', () => {
     preload: jest.Mock;
     softRemove: jest.Mock;
     restore: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
+  let queryBuilderMock: {
+    orderBy: jest.Mock;
+    andWhere: jest.Mock;
+    skip: jest.Mock;
+    take: jest.Mock;
+    getMany: jest.Mock;
+    getManyAndCount: jest.Mock;
   };
 
   const espacioBase: EspacioAcademico = {
@@ -25,6 +34,14 @@ describe('EspaciosAcademicosService', () => {
   };
 
   beforeEach(async () => {
+    queryBuilderMock = {
+      orderBy: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+      getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    };
     repository = {
       findOne: jest.fn(),
       find: jest.fn(),
@@ -33,6 +50,7 @@ describe('EspaciosAcademicosService', () => {
       preload: jest.fn((data) => Promise.resolve({ ...espacioBase, ...data })),
       softRemove: jest.fn(),
       restore: jest.fn(),
+      createQueryBuilder: jest.fn(() => queryBuilderMock),
     };
 
     const dataSourceMock = { getRepository: jest.fn(() => repository) };
@@ -48,31 +66,32 @@ describe('EspaciosAcademicosService', () => {
   });
 
   describe('findAll', () => {
-    it('sin `buscar` lista todo, ordenado por nombre', async () => {
-      repository.find.mockResolvedValue([espacioBase]);
+    it('sin `buscar` lista todo, ordenado por fecha de creación', async () => {
+      queryBuilderMock.getMany.mockResolvedValue([espacioBase]);
 
       await service.findAll();
 
-      expect(repository.find).toHaveBeenCalledWith({
-        order: { nombre: 'ASC' },
-      });
+      expect(queryBuilderMock.orderBy).toHaveBeenCalledWith(
+        'espacio.fechaCreacion',
+        'DESC',
+      );
+      expect(queryBuilderMock.andWhere).not.toHaveBeenCalled();
     });
 
     it('con `buscar` filtra por nombre (case-insensitive)', async () => {
-      repository.find.mockResolvedValue([espacioBase]);
+      queryBuilderMock.getMany.mockResolvedValue([espacioBase]);
 
       const resultado = await service.findAll('electr');
 
-      expect(repository.find).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ nombre: expect.anything() }),
-        }),
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('LOWER(espacio.nombre)'),
+        expect.objectContaining({ buscar: expect.stringContaining('electr') }),
       );
       expect(resultado).toHaveLength(1);
     });
 
     it('no expone el campo interno nombreActivo', async () => {
-      repository.find.mockResolvedValue([
+      queryBuilderMock.getMany.mockResolvedValue([
         { ...espacioBase, nombreActivo: 'Electrónica Digital II' },
       ]);
 

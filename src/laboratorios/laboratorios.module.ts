@@ -4,6 +4,7 @@ import { EspaciosLaboratorioController } from './controllers/espacios-laboratori
 import { LaboratoriosService } from './services/laboratorios.service';
 import { EspaciosLaboratorioService } from './services/espacios-laboratorio.service';
 import { DocentesLaboratorioService } from './services/docentes-laboratorio.service';
+import { LaboratoristasLaboratorioService } from './services/laboratoristas-laboratorio.service';
 
 @Module({
   controllers: [LaboratoriosController, EspaciosLaboratorioController],
@@ -11,11 +12,13 @@ import { DocentesLaboratorioService } from './services/docentes-laboratorio.serv
     LaboratoriosService,
     EspaciosLaboratorioService,
     DocentesLaboratorioService,
+    LaboratoristasLaboratorioService,
   ],
   exports: [
     LaboratoriosService,
     EspaciosLaboratorioService,
     DocentesLaboratorioService,
+    LaboratoristasLaboratorioService,
   ],
 })
 export class LaboratoriosModule {}

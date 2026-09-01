@@ -19,12 +19,18 @@ import { resolvePagination } from 'src/common/pagination/pagination.util';
  * admin solo puede listar, ver, cambiar el rol y eliminar.
  */
 @ApiTags('usuarios')
-@Roles('admin')
 @Controller('usuarios')
 export class UsuariosController {
   constructor(private readonly usuariosService: UsuariosService) {}
 
+  /**
+   * Abierto también a laboratorista: el módulo de horarios académicos
+   * necesita listar docentes (filtro ?rol=docente) para el selector de
+   * "docente encargado" al crear un horario, tanto en el formulario manual
+   * como en la carga masiva por Excel.
+   */
   @Get()
+  @Roles('admin', 'laboratorista')
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({
     name: 'limit',
@@ -65,16 +71,19 @@ export class UsuariosController {
   }
 
   @Get(':id')
+  @Roles('admin', 'laboratorista')
   findOne(@Param('id') id: string) {
     return this.usuariosService.findOne(id);
   }
 
   @Patch(':id')
+  @Roles('admin')
   update(@Param('id') id: string, @Body() updateUsuarioDto: UpdateUsuarioDto) {
     return this.usuariosService.update(id, updateUsuarioDto);
   }
 
   @Delete(':id')
+  @Roles('admin')
   remove(@Param('id') id: string) {
     return this.usuariosService.remove(id);
   }

@@ -26,12 +26,9 @@ const TIPOS_RESERVA_BASE: Array<{
     esExclusiva: false,
     requiereEspacio: false,
   },
-  { nombre: 'Clase Cancelada', esExclusiva: false, requiereEspacio: false },
-  {
-    nombre: 'Prácticas Libres Canceladas',
-    esExclusiva: false,
-    requiereEspacio: false,
-  },
+  // "Clase Cancelada" y "Prácticas Libres Canceladas" NO van aquí: son
+  // estados que toma una reserva cuando se cancela, no tipos de reserva
+  // seleccionables.
 ];
 
 const DIVISIONES_BASE = [
@@ -42,14 +39,62 @@ const DIVISIONES_BASE = [
   'Ciencias Jurídicas y Políticas',
 ];
 
+/**
+ * Tomado literalmente de la tabla División/Facultad/Nivel del documento de
+ * referencia (screenshots del usuario). Ciencias de la Salud queda
+ * incompleta a propósito: las dos capturas recibidas cortan esa división
+ * justo en el borde inferior de la tabla — falta el resto de sus programas
+ * de pregrado y posgrado, pendiente de que el usuario mande esas filas.
+ */
 const FACULTADES_BASE: Array<{
   division: string;
   nombre: string;
   nivel: NivelFacultad;
 }> = [
+  // ---- Pregrado ----
+  {
+    division: 'Ciencias Sociales y de la Educación',
+    nombre: 'Diseño de Interacción',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Ciencias Sociales y de la Educación',
+    nombre: 'Licenciatura en Español y Lenguas Extranjeras Inglés y Francés',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Ciencias Sociales y de la Educación',
+    nombre: 'Licenciatura en Educación Infantil Bilingüe',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Marketing y Transformación Digital',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Administración de Empresas',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Negocios Internacionales',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Contaduría Pública',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Derecho',
+    nivel: NivelFacultad.PREGRADO,
+  },
   {
     division: 'Arquitectura e Ingenierías',
-    nombre: 'Ingeniería Electrónica',
+    nombre: 'Ingeniería de Datos e Inteligencia Artificial',
     nivel: NivelFacultad.PREGRADO,
   },
   {
@@ -59,7 +104,12 @@ const FACULTADES_BASE: Array<{
   },
   {
     division: 'Arquitectura e Ingenierías',
-    nombre: 'Ingeniería Mecánica',
+    nombre: 'Arquitectura',
+    nivel: NivelFacultad.PREGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Ingeniería Ambiental',
     nivel: NivelFacultad.PREGRADO,
   },
   {
@@ -69,56 +119,182 @@ const FACULTADES_BASE: Array<{
   },
   {
     division: 'Arquitectura e Ingenierías',
-    nombre: 'Arquitectura',
+    nombre: 'Ingeniería de Sistemas',
     nivel: NivelFacultad.PREGRADO,
   },
   {
     division: 'Arquitectura e Ingenierías',
-    nombre: 'Diseño de Interacción',
+    nombre: 'Ingeniería Electrónica',
     nivel: NivelFacultad.PREGRADO,
   },
   {
     division: 'Arquitectura e Ingenierías',
-    nombre: 'Ing. de Datos e Inteligencia Artificial',
+    nombre: 'Ingeniería Mecánica',
     nivel: NivelFacultad.PREGRADO,
   },
   {
-    division: 'Ciencias de la Salud',
-    nombre: 'Enfermería',
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Ingeniería Industrial',
     nivel: NivelFacultad.PREGRADO,
   },
-  // Nombres tomados literalmente del prompt de export de asistencias — no
-  // inventados (ver GAP-REPORT.md §4, pregunta 5: el catálogo real de 48
-  // facultades queda pendiente de carga por un admin vía CRUD existente).
   {
     division: 'Ciencias de la Salud',
     nombre: 'Cultura Física, Deporte y Recreación',
     nivel: NivelFacultad.PREGRADO,
   },
+
+  // ---- Posgrado ----
   {
-    division: 'Ciencias de la Salud',
-    nombre: 'Maestría en Entrenamiento Deportivo y Actividad Física',
+    division: 'Ciencias Sociales y de la Educación',
+    nombre: 'Doctorado en Pedagogía y Neurociencia Aplicada a la Educación',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Maestría en Marketing Internacional y Negocios',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Especialización en Auditoría de Salud',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Especialización en Auditoría y Aseguramiento de la Información',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Especialización en Gobierno y Gestión Territorial',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Especialización en Innovación y Marketing',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Económicas, Administrativas y Contables',
+    nombre: 'Maestría en Administración',
     nivel: NivelFacultad.POSGRADO,
   },
   {
     division: 'Ciencias Jurídicas y Políticas',
-    nombre: 'Derecho',
-    nivel: NivelFacultad.PREGRADO,
-  },
-  {
-    division: 'Ciencias Sociales y de la Educación',
-    nombre: 'Doctorado en Pedagogía',
+    nombre: 'Maestría en Derecho Minero-Ambiental',
     nivel: NivelFacultad.POSGRADO,
   },
   {
-    division: 'Ciencias Económicas, Administrativas y Contables',
-    nombre: 'Contaduría Pública',
-    nivel: NivelFacultad.PREGRADO,
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Especialización en Derecho Penal y Procesal Penal',
+    nivel: NivelFacultad.POSGRADO,
   },
   {
-    division: 'Ciencias Económicas, Administrativas y Contables',
-    nombre: 'Administración de Empresas',
-    nivel: NivelFacultad.PREGRADO,
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Especialización en Derecho Administrativo',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Especialización en Contratación Estatal',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Especialización en Psicología Jurídica y Forense',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Maestría en Derecho Administrativo',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Maestría en Derecho Penal y Procesal Penal',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Maestría en Derecho Privado',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre: 'Doctorado en Derecho Público',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias Jurídicas y Políticas',
+    nombre:
+      'Estancia Posdoctoral en Ciencias Jurídicas, Innovación y Sociedad Global',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Maestría en Arquitectura Avanzada',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Maestría en Geotecnia Vial y Pavimentos',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Especialización en Ingeniería Hidroambiental',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Especialización en Gerencia de Mantenimiento y Gestión de Activos',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre:
+      'Especialización en Gestión de Nuevas Tecnologías de Telecomunicaciones',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Especialización en Dirección y Gestión de la Calidad',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Especialización en Gerencia de Proyectos de Construcción',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Especialización en Geotecnia Vial y Pavimentos',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Especialización en Estructuras',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Especialización en Ingeniería Civil con Énfasis en Hidroambiental',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Maestría en Ingeniería',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Arquitectura e Ingenierías',
+    nombre: 'Maestría en Manejo y Sostenibilidad Ambiental',
+    nivel: NivelFacultad.POSGRADO,
+  },
+  {
+    division: 'Ciencias de la Salud',
+    nombre: 'Maestría en Entrenamiento Deportivo y Actividad Física',
+    nivel: NivelFacultad.POSGRADO,
   },
 ];
 

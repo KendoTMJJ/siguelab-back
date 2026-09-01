@@ -20,6 +20,11 @@ export enum EstadoSolicitud {
   PENDIENTE_DOCENTE = 'pendiente_docente',
   PENDIENTE_LABORATORISTA = 'pendiente_laboratorista',
   APROBADA = 'aprobada',
+  /** Cierre real del flujo: el laboratorista ya registró el uso en bitácora
+   * (ver BitacoraService.create -> SolicitudesService.marcarRealizada).
+   * Antes de esto, una solicitud aprobada se quedaba "aprobada" para
+   * siempre, sin ningún estado que reflejara que la práctica ya ocurrió. */
+  REALIZADA = 'realizada',
   RECHAZADA = 'rechazada',
   CANCELADA = 'cancelada',
 }
@@ -118,6 +123,21 @@ export class SolicitudReserva {
 
   @Column({ name: 'motivo_cancelacion', type: 'text', nullable: true })
   motivoCancelacion?: string | null;
+
+  /** El solicitante puede "limpiar" su vista de Mis Solicitudes ocultando
+   * las suyas ya resueltas (rechazada/cancelada) — no borra el registro,
+   * solo lo saca de findMias. Historial/Estadísticas/Bandeja no la miran. */
+  @Column({ default: false })
+  archivada!: boolean;
+
+  /** "Vaciar archivadas" — soft delete separado de `archivada`: saca la
+   * solicitud de Mis Solicitudes para siempre (activas Y archivadas), pero
+   * NO toca Historial/Estadísticas (esas vistas no filtran por esta
+   * columna, así que siguen viendo todo — el rastro de auditoría para
+   * admin/laboratorista nunca depende de lo que el solicitante decida
+   * limpiar de su propia bandeja). */
+  @Column({ default: false })
+  eliminada!: boolean;
 
   @Column({ name: 'reactivos_sustancias', type: 'text', nullable: true })
   reactivosSustancias?: string | null;

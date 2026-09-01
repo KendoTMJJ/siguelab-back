@@ -20,6 +20,7 @@ import { DivisionesService } from '../services/divisiones.service';
 import { CreateDivisionDto } from '../dto/division/create-division.dto';
 import { UpdateDivisionDto } from '../dto/division/update-division.dto';
 import { Roles } from 'src/auth/jwt/roles.decorator';
+import { resolvePagination } from 'src/common/pagination/pagination.util';
 
 @ApiTags('Divisiones')
 @ApiBearerAuth()
@@ -48,11 +49,29 @@ export class DivisionesController {
     required: false,
     description: 'Filtra por nombre (contiene, sin distinguir mayúsculas)',
   })
-  @ApiOperation({ summary: 'Listar divisiones activas (orden alfabético)' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description:
+      'Si se envía (junto con o sin `limit`), la respuesta es { data, meta }. Si se omiten ambos, devuelve el arreglo completo (lo usan los <select> de otras pantallas).',
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOperation({
+    summary: 'Listar divisiones activas (más recientes primero)',
+  })
   @ApiResponse({ status: 200, description: 'Listado de divisiones' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
-  findAll(@Query('buscar') buscar?: string) {
-    return this.divisionesService.findAll(buscar);
+  findAll(
+    @Query('buscar') buscar?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pagination =
+      page || limit ? resolvePagination(page, limit) : undefined;
+    return pagination
+      ? this.divisionesService.findAll(buscar, pagination)
+      : this.divisionesService.findAll(buscar);
   }
 
   @Get(':id')
