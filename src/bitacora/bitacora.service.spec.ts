@@ -10,6 +10,7 @@ import {
   SolicitudReserva,
 } from 'src/solicitudes/entities/solicitud-reserva.entity';
 import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorator';
+import { SolicitudesService } from 'src/solicitudes/solicitudes.service';
 
 describe('BitacoraService', () => {
   let service: BitacoraService;
@@ -26,12 +27,22 @@ describe('BitacoraService', () => {
   };
   let laboratorioRepository: { findOne: jest.Mock };
   let tipoReservaRepository: { findOne: jest.Mock };
+  let solicitudesService: { marcarRealizada: jest.Mock };
 
   const laboratorista: AuthenticatedUser = {
     id: 'lab-uuid-1',
     nombre: 'Laboratorista Uno',
     correo: 'laboratorista@usantoto.edu.co',
     rol: 'laboratorista',
+    cargo: null,
+    facultad: null,
+  };
+
+  const admin: AuthenticatedUser = {
+    id: 'admin-uuid-1',
+    nombre: 'Admin Uno',
+    correo: 'admin@usantoto.edu.co',
+    rol: 'admin',
     cargo: null,
     facultad: null,
   };
@@ -77,6 +88,9 @@ describe('BitacoraService', () => {
     };
     laboratorioRepository = { findOne: jest.fn() };
     tipoReservaRepository = { findOne: jest.fn() };
+    solicitudesService = {
+      marcarRealizada: jest.fn().mockResolvedValue(undefined),
+    };
 
     const repos = new Map<unknown, unknown>([
       [RegistroUso, registroUsoRepository],
@@ -92,6 +106,7 @@ describe('BitacoraService', () => {
       providers: [
         BitacoraService,
         { provide: DataSource, useValue: dataSourceMock },
+        { provide: SolicitudesService, useValue: solicitudesService },
       ],
     }).compile();
 
@@ -110,6 +125,7 @@ describe('BitacoraService', () => {
         idSolicitud: null,
       });
       expect(solicitudRepository.findOne).not.toHaveBeenCalled();
+      expect(solicitudesService.marcarRealizada).not.toHaveBeenCalled();
     });
 
     it('lanza NOT_FOUND si el laboratorio no existe', async () => {
@@ -172,6 +188,10 @@ describe('BitacoraService', () => {
       );
 
       expect(registro).toMatchObject({ idSolicitud: 5 });
+      expect(solicitudesService.marcarRealizada).toHaveBeenCalledWith(
+        5,
+        laboratorista.id,
+      );
     });
 
     it('lanza BAD_REQUEST si hora_fin_real <= hora_inicio_real', async () => {
@@ -303,7 +323,7 @@ describe('BitacoraService', () => {
       const registro = { idRegistro: 1 };
       registroUsoRepository.findOne.mockResolvedValue(registro);
 
-      await expect(service.findOne(1)).resolves.toBe(registro);
+      await expect(service.findOne(1, admin)).resolves.toBe(registro);
       expect(registroUsoRepository.findOne).toHaveBeenCalledWith({
         where: { idRegistro: 1 },
         relations: {
@@ -318,7 +338,7 @@ describe('BitacoraService', () => {
     it('lanza NOT_FOUND si no existe', async () => {
       registroUsoRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.findOne(999)).rejects.toMatchObject({
+      await expect(service.findOne(999, admin)).rejects.toMatchObject({
         status: HttpStatus.NOT_FOUND,
       });
     });
@@ -335,6 +355,7 @@ describe('BitacoraService', () => {
           fechaHasta: '2026-08-31',
         },
         paginacionDefault,
+        admin,
       );
 
       expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
@@ -352,7 +373,7 @@ describe('BitacoraService', () => {
     });
 
     it('siempre resuelve laboratorio, tipoReserva, laboratorista y solicitud con join', async () => {
-      await service.findAll({}, paginacionDefault);
+      await service.findAll({}, paginacionDefault, admin);
 
       expect(queryBuilderMock.leftJoinAndSelect).toHaveBeenCalledWith(
         'registro.laboratorio',
@@ -373,7 +394,7 @@ describe('BitacoraService', () => {
     });
 
     it('filtra por periodo reusando el alias de la solicitud ya unida', async () => {
-      await service.findAll({ idPeriodo: 3 }, paginacionDefault);
+      await service.findAll({ idPeriodo: 3 }, paginacionDefault, admin);
 
       expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
         'solicitud.id_periodo = :idPeriodo',
@@ -387,7 +408,7 @@ describe('BitacoraService', () => {
         1,
       ]);
 
-      const resultado = await service.findAll({}, paginacionDefault);
+      const resultado = await service.findAll({}, paginacionDefault, admin);
 
       expect(queryBuilderMock.skip).toHaveBeenCalledWith(0);
       expect(queryBuilderMock.take).toHaveBeenCalledWith(20);
@@ -403,6 +424,7 @@ describe('BitacoraService', () => {
       const resultado = await service.findAll(
         {},
         { page: 2, limit: 20, skip: 20, take: 20 },
+        admin,
       );
 
       expect(queryBuilderMock.skip).toHaveBeenCalledWith(20);

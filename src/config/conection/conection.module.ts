@@ -3,6 +3,9 @@ import { DataSource } from 'typeorm';
 import { seedAdmin, seedUsuariosDemo } from '../seed/seed';
 import { seedCatalogos } from '../../catalogos/seed/catalogos.seed';
 import { seedLaboratorios } from '../../laboratorios/seed/laboratorios.seed';
+import { seedEspaciosLaboratorios } from '../../laboratorios/seed/espacios-laboratorios.seed';
+import { seedEquipos } from '../../equipos-laboratorio/seed/equipos.seed';
+import { seedServicios } from '../../servicios/seed/servicios.seed';
 import { backfillEventosSolicitud } from '../seed/backfill-eventos-solicitud';
 
 @Global()
@@ -33,6 +36,9 @@ import { backfillEventosSolicitud } from '../seed/backfill-eventos-solicitud';
           await seedUsuariosDemo(poolConection);
           await seedCatalogos(poolConection);
           await seedLaboratorios(poolConection);
+          await seedEspaciosLaboratorios(poolConection);
+          await seedEquipos(poolConection);
+          await seedServicios(poolConection);
           await backfillEventosSolicitud(poolConection);
           return poolConection;
         } catch (error) {

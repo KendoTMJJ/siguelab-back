@@ -20,6 +20,7 @@ import { EspaciosAcademicosService } from '../services/espacios-academicos.servi
 import { CreateEspacioAcademicoDto } from '../dto/espacio-academico/create-espacio-academico.dto';
 import { UpdateEspacioAcademicoDto } from '../dto/espacio-academico/update-espacio-academico.dto';
 import { Roles } from 'src/auth/jwt/roles.decorator';
+import { resolvePagination } from 'src/common/pagination/pagination.util';
 
 @ApiTags('Espacios académicos')
 @ApiBearerAuth()
@@ -50,11 +51,29 @@ export class EspaciosAcademicosController {
     required: false,
     description: 'Filtra por nombre (contiene, sin distinguir mayúsculas)',
   })
-  @ApiOperation({ summary: 'Listar espacios académicos activos' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description:
+      'Si se envía (junto con o sin `limit`), la respuesta es { data, meta }. Si se omiten ambos, devuelve el arreglo completo (lo usan los <select> de otras pantallas).',
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOperation({
+    summary: 'Listar espacios académicos activos (más recientes primero)',
+  })
   @ApiResponse({ status: 200, description: 'Listado de espacios académicos' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
-  findAll(@Query('buscar') buscar?: string) {
-    return this.espaciosAcademicosService.findAll(buscar);
+  findAll(
+    @Query('buscar') buscar?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pagination =
+      page || limit ? resolvePagination(page, limit) : undefined;
+    return pagination
+      ? this.espaciosAcademicosService.findAll(buscar, pagination)
+      : this.espaciosAcademicosService.findAll(buscar);
   }
 
   @Get(':id')

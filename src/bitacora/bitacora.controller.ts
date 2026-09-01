@@ -57,6 +57,12 @@ export class BitacoraController {
   @ApiQuery({ name: 'fechaDesde', required: false, type: String })
   @ApiQuery({ name: 'fechaHasta', required: false, type: String })
   @ApiQuery({ name: 'idPeriodo', required: false, type: Number })
+  @ApiQuery({
+    name: 'buscar',
+    required: false,
+    description:
+      'Filtra por nombre de la práctica (contiene, sin distinguir mayúsculas)',
+  })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({
     name: 'limit',
@@ -64,7 +70,10 @@ export class BitacoraController {
     type: Number,
     description: 'Máx. 100, por defecto 20',
   })
-  @ApiOperation({ summary: 'Listar la bitácora de uso (paginado)' })
+  @ApiOperation({
+    summary:
+      'Listar la bitácora de uso (paginado) — docente/laboratorista ven solo su propia actividad, admin ve todo',
+  })
   @ApiResponse({
     status: 200,
     description: '{ data, meta: { total, page, limit, totalPages } }',
@@ -72,10 +81,12 @@ export class BitacoraController {
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Rol insuficiente' })
   findAll(
+    @CurrentUser() usuario: AuthenticatedUser,
     @Query('idLaboratorio') idLaboratorio?: string,
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
     @Query('idPeriodo') idPeriodo?: string,
+    @Query('buscar') buscar?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -85,8 +96,10 @@ export class BitacoraController {
         fechaDesde,
         fechaHasta,
         idPeriodo: idPeriodo ? Number(idPeriodo) : undefined,
+        buscar,
       },
       resolvePagination(page, limit),
+      usuario,
     );
   }
 
@@ -99,6 +112,21 @@ export class BitacoraController {
     type: Number,
     description: 'Máx. 100, por defecto 20',
   })
+  @ApiQuery({
+    name: 'idLaboratorio',
+    required: false,
+    type: Number,
+    description:
+      'Filtra a las solicitudes pendientes de ese laboratorio — para cuando terminan varias clases de distintos laboratorios a la vez.',
+  })
+  @ApiQuery({ name: 'fechaDesde', required: false, type: String })
+  @ApiQuery({ name: 'fechaHasta', required: false, type: String })
+  @ApiQuery({
+    name: 'buscar',
+    required: false,
+    description:
+      'Filtra por nombre de la práctica (contiene, sin distinguir mayúsculas)',
+  })
   @ApiOperation({
     summary:
       'Solicitudes aprobadas que todavía no tienen registro de bitácora (paginado)',
@@ -109,9 +137,20 @@ export class BitacoraController {
   })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Rol insuficiente' })
-  pendientes(@Query('page') page?: string, @Query('limit') limit?: string) {
+  pendientes(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('idLaboratorio') idLaboratorio?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+    @Query('buscar') buscar?: string,
+  ) {
     return this.bitacoraService.pendientesPorRegistrar(
       resolvePagination(page, limit),
+      idLaboratorio ? Number(idLaboratorio) : undefined,
+      fechaDesde,
+      fechaHasta,
+      buscar,
     );
   }
 
@@ -120,10 +159,13 @@ export class BitacoraController {
   @ApiOperation({ summary: 'Ver el detalle de un registro de bitácora' })
   @ApiResponse({ status: 200, description: 'Registro encontrado' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
-  @ApiResponse({ status: 403, description: 'Rol insuficiente' })
+  @ApiResponse({ status: 403, description: 'Rol insuficiente, o no es tuyo' })
   @ApiResponse({ status: 404, description: 'Registro no encontrado' })
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.bitacoraService.findOne(id);
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() usuario: AuthenticatedUser,
+  ) {
+    return this.bitacoraService.findOne(id, usuario);
   }
 
   @Patch(':id')

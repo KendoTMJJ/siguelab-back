@@ -31,8 +31,8 @@ export class Facultad {
   nombre!: string;
 
   /**
-   * Agregado para el export de asistencias a Power BI (columna "Nivel" del
-   * Excel) — no existía ningún concepto de pregrado/posgrado en el sistema.
+   * Agregado para el Excel de asistencias en laboratorios (columna "Nivel")
+   * — no existía ningún concepto de pregrado/posgrado en el sistema.
    */
   @Column({
     type: 'enum',

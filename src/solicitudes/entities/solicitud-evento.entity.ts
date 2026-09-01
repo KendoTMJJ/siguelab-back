@@ -16,6 +16,7 @@ export enum TipoEventoSolicitud {
   FIRMA_LABORATORISTA_APROBADA = 'firma_laboratorista_aprobada',
   FIRMA_LABORATORISTA_RECHAZADA = 'firma_laboratorista_rechazada',
   CANCELADA = 'cancelada',
+  REALIZADA = 'realizada',
 }
 
 /**

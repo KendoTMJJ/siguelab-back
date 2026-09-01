@@ -3,25 +3,18 @@ import { DataSource, Repository } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { RegistroUso } from 'src/bitacora/entities/registro-uso.entity';
 import { PeriodoAcademico } from 'src/catalogos/entities/periodo-academico.entity';
-import { Laboratorio } from 'src/laboratorios/entities/laboratorio.entity';
-import {
-  Facultad,
-  NivelFacultad,
-} from 'src/catalogos/entities/facultad.entity';
-import { Division } from 'src/catalogos/entities/division.entity';
+import { NivelFacultad } from 'src/catalogos/entities/facultad.entity';
 import {
   AREAS,
   ENCABEZADOS_COLUMNAS,
   LABORATORIO_A_HOJA,
-  NIVEL_LISTA_CERRADA,
   OBSERVACIONES_LISTA_CERRADA,
-  SEMANAS_LISTA,
   TIPOS_DOCENTE_ES_ESTUDIANTES,
-  USO_LABORATORIO_LISTA_CERRADA,
   USO_LABORATORIO_MAP,
   nombreExcelLaboratorio,
   observacionExcel,
 } from './constantes/asistencias-excel.constants';
+import { hoyBogotaISO } from 'src/common/utils/fecha-horario.util';
 import { calcularSemana } from './utils/calcular-semana.util';
 import { calcularTiempoDeUso } from './utils/tiempo-de-uso.util';
 import { ExportarAsistenciasQueryDto } from './dto/exportar-asistencias-query.dto';
@@ -35,16 +28,10 @@ import {
 export class ReportesService {
   private readonly registroUsoRepository: Repository<RegistroUso>;
   private readonly periodoRepository: Repository<PeriodoAcademico>;
-  private readonly laboratorioRepository: Repository<Laboratorio>;
-  private readonly facultadRepository: Repository<Facultad>;
-  private readonly divisionRepository: Repository<Division>;
 
   constructor(private readonly dataSource: DataSource) {
     this.registroUsoRepository = this.dataSource.getRepository(RegistroUso);
     this.periodoRepository = this.dataSource.getRepository(PeriodoAcademico);
-    this.laboratorioRepository = this.dataSource.getRepository(Laboratorio);
-    this.facultadRepository = this.dataSource.getRepository(Facultad);
-    this.divisionRepository = this.dataSource.getRepository(Division);
   }
 
   /**
@@ -82,7 +69,7 @@ export class ReportesService {
       };
     }
 
-    const hoy = new Date().toISOString().slice(0, 10);
+    const hoy = hoyBogotaISO();
     const activo = await this.periodoRepository
       .createQueryBuilder('periodo')
       .where('periodo.fecha_inicio <= :hoy', { hoy })
@@ -263,13 +250,18 @@ export class ReportesService {
     filtros: ExportarAsistenciasQueryDto,
   ): Promise<{ buffer: Buffer; nombreArchivo: string }> {
     const reporte = await this.generarReporte(filtros);
-    const [laboratorios, facultades, divisiones] = await Promise.all([
-      this.laboratorioRepository.find({ order: { nombre: 'ASC' } }),
-      this.facultadRepository.find({ order: { nombre: 'ASC' } }),
-      this.divisionRepository.find({ order: { nombre: 'ASC' } }),
-    ]);
+    const todasLasFilas = [...reporte.filasPorHoja.values()].flat();
 
     const workbook = new ExcelJS.Workbook();
+
+    // Primera hoja: totales de horas de uso por laboratorio/división/facultad
+    // — antes este export no tenía ningún resumen, solo listas planas de
+    // registros; esto es lo único que alguien realmente necesita mirar de
+    // entrada (ver conversación con el usuario sobre qué sobraba/faltaba).
+    escribirResumen(
+      workbook.addWorksheet('Resumen'),
+      construirResumen(todasLasFilas),
+    );
 
     for (const area of AREAS) {
       const worksheet = workbook.addWorksheet(area.hoja);
@@ -285,7 +277,6 @@ export class ReportesService {
       });
 
       aplicarFormatosDeColumna(worksheet, filas.length);
-      escribirListasAuxiliares(worksheet, laboratorios, facultades, divisiones);
     }
 
     const arrayBuffer = await workbook.xlsx.writeBuffer();
@@ -338,59 +329,98 @@ function aplicarFormatosDeColumna(
   }
 }
 
-/**
- * Columnas Q–W: listas de referencia (ver GAP-REPORT.md). Q y "Facultad" (T,
- * ver nota abajo) salen del catálogo real en vez de una lista fija, para no
- * inventar los nombres que el usuario no dio completos — ver EXPORT-NOTES.md.
- * No se reconstruyen las validaciones de datos (dropdowns) sobre A/F/G/H/J/N/O
- * porque este archivo no se edita a mano — es una foto generada, no una
- * plantilla de captura (ver EXPORT-NOTES.md).
- */
-function escribirListasAuxiliares(
-  worksheet: ExcelJS.Worksheet,
-  laboratorios: Laboratorio[],
-  facultades: Facultad[],
-  divisiones: Division[],
-): void {
-  const columnas: Array<{
-    letra: string;
-    encabezado: string;
-    valores: unknown[];
-  }> = [
-    {
-      letra: 'Q',
-      encabezado: 'Lista laboratorios',
-      valores: laboratorios.map((l) => nombreExcelLaboratorio(l.nombre)),
-    },
-    { letra: 'R', encabezado: 'Lista de Semanas', valores: [...SEMANAS_LISTA] },
-    {
-      letra: 'S',
-      encabezado: 'Division',
-      valores: divisiones.map((d) => d.nombre),
-    },
-    {
-      letra: 'T',
-      encabezado: 'Facultad',
-      valores: facultades.map((f) => f.nombre),
-    },
-    { letra: 'U', encabezado: 'Nivel', valores: [...NIVEL_LISTA_CERRADA] },
-    {
-      letra: 'V',
-      encabezado: 'Uso de Laboratorio',
-      valores: [...USO_LABORATORIO_LISTA_CERRADA],
-    },
-    {
-      letra: 'W',
-      encabezado: 'Observaciones',
-      valores: [...OBSERVACIONES_LISTA_CERRADA],
-    },
-  ];
+interface FilaResumen {
+  nombre: string;
+  horas: number;
+}
 
-  for (const columna of columnas) {
-    worksheet.getCell(`${columna.letra}1`).value = columna.encabezado;
-    columna.valores.forEach((valor, indice) => {
-      worksheet.getCell(`${columna.letra}${indice + 2}`).value = valor as
-        string | number;
-    });
+interface Resumen {
+  porLaboratorio: FilaResumen[];
+  porDivision: FilaResumen[];
+  porFacultad: FilaResumen[];
+}
+
+/** Suma fila.tiempoDeUso (horas) agrupado por laboratorio/división/facultad
+ * — a partir de las mismas filas ya calculadas para las 14 hojas, así que no
+ * hace ninguna consulta extra. Las filas sin solicitud asociada (Division/
+ * Facultad vacíos) simplemente no aportan a esas dos agrupaciones, pero sí a
+ * la de laboratorio. Ordenado de mayor a menor uso. */
+function construirResumen(filas: FilaAsistencia[]): Resumen {
+  const porLaboratorio = new Map<string, number>();
+  const porDivision = new Map<string, number>();
+  const porFacultad = new Map<string, number>();
+
+  const sumar = (
+    mapa: Map<string, number>,
+    clave: string,
+    horas: number,
+  ): void => {
+    if (!clave) {
+      return;
+    }
+    mapa.set(clave, (mapa.get(clave) ?? 0) + horas);
+  };
+
+  for (const fila of filas) {
+    sumar(porLaboratorio, fila.laboratorioExcel, fila.tiempoDeUso);
+    sumar(porDivision, fila.division, fila.tiempoDeUso);
+    sumar(porFacultad, fila.facultad, fila.tiempoDeUso);
   }
+
+  const aLista = (mapa: Map<string, number>): FilaResumen[] =>
+    [...mapa.entries()]
+      .map(([nombre, horas]) => ({
+        nombre,
+        horas: Math.round(horas * 100) / 100,
+      }))
+      .sort((a, b) => b.horas - a.horas);
+
+  return {
+    porLaboratorio: aLista(porLaboratorio),
+    porDivision: aLista(porDivision),
+    porFacultad: aLista(porFacultad),
+  };
+}
+
+/** Tres bloques apilados (Laboratorio / División / Facultad), cada uno con
+ * su propio título y encabezado — se escriben con celdas planas en vez de
+ * addTable para no lidiar con nombres/rangos de tabla superpuestos. */
+function escribirResumen(worksheet: ExcelJS.Worksheet, resumen: Resumen): void {
+  worksheet.getColumn('A').width = 42;
+  worksheet.getColumn('B').width = 14;
+
+  let fila = 1;
+  const escribirBloque = (titulo: string, datos: FilaResumen[]): void => {
+    const tituloCelda = worksheet.getCell(`A${fila}`);
+    tituloCelda.value = titulo;
+    tituloCelda.font = { bold: true, size: 13 };
+    fila += 1;
+
+    const encabezadoNombre = worksheet.getCell(`A${fila}`);
+    const encabezadoHoras = worksheet.getCell(`B${fila}`);
+    encabezadoNombre.value = 'Nombre';
+    encabezadoHoras.value = 'Horas de uso';
+    encabezadoNombre.font = { bold: true };
+    encabezadoHoras.font = { bold: true };
+    fila += 1;
+
+    if (datos.length === 0) {
+      worksheet.getCell(`A${fila}`).value = 'Sin registros en el periodo.';
+      fila += 2;
+      return;
+    }
+
+    for (const item of datos) {
+      worksheet.getCell(`A${fila}`).value = item.nombre;
+      const celdaHoras = worksheet.getCell(`B${fila}`);
+      celdaHoras.value = item.horas;
+      celdaHoras.numFmt = '0.00';
+      fila += 1;
+    }
+    fila += 1; // fila en blanco entre bloques
+  };
+
+  escribirBloque('Uso de laboratorios', resumen.porLaboratorio);
+  escribirBloque('Uso por división', resumen.porDivision);
+  escribirBloque('Uso por facultad', resumen.porFacultad);
 }

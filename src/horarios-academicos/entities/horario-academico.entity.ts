@@ -59,6 +59,19 @@ export class HorarioAcademico {
   @JoinColumn({ name: 'id_docente' })
   docente?: Usuario | null;
 
+  /**
+   * Quién cargó este horario — nullable porque los ya existentes (creados
+   * antes de este campo) no tienen dueño. Un laboratorista solo puede ver y
+   * editar los horarios donde este id coincide con el suyo; admin ve y edita
+   * todos sin importar quién los cargó (ver HorariosAcademicosService).
+   */
+  @Column({ name: 'id_laboratorista', type: 'uuid', nullable: true })
+  idLaboratorista?: string | null;
+
+  @ManyToOne(() => Usuario, { nullable: true })
+  @JoinColumn({ name: 'id_laboratorista' })
+  laboratorista?: Usuario | null;
+
   @Column({ name: 'id_periodo' })
   idPeriodo!: number;
 

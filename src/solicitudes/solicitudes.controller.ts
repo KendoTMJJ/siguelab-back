@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -92,11 +94,35 @@ export class SolicitudesController {
   }
 
   @Get('mias')
+  @ApiQuery({
+    name: 'archivadas',
+    required: false,
+    type: Boolean,
+    description: 'true para ver solo las archivadas, por defecto las activas',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description:
+      'Si se envía (junto con o sin `limit`), la respuesta es { data, meta }. Si se omiten ambos, devuelve el arreglo completo (lo usa Inicio para sus contadores).',
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiOperation({ summary: 'Listar mis solicitudes (con firmas embebidas)' })
   @ApiResponse({ status: 200, description: 'Listado de mis solicitudes' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
-  findMias(@CurrentUser() usuario: AuthenticatedUser) {
-    return this.solicitudesService.findMias(usuario);
+  findMias(
+    @CurrentUser() usuario: AuthenticatedUser,
+    @Query('archivadas') archivadas?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const esArchivadas = archivadas === 'true';
+    const pagination =
+      page || limit ? resolvePagination(page, limit) : undefined;
+    return pagination
+      ? this.solicitudesService.findMias(usuario, esArchivadas, pagination)
+      : this.solicitudesService.findMias(usuario, esArchivadas);
   }
 
   @Get('pendientes-de-mi-firma')
@@ -258,5 +284,58 @@ export class SolicitudesController {
     @CurrentUser() usuario: AuthenticatedUser,
   ) {
     return this.solicitudesService.cancelar(id, usuario, cancelarSolicitudDto);
+  }
+
+  @Patch(':id/archivar')
+  @ApiOperation({
+    summary:
+      'Ocultar la solicitud de "Mis solicitudes" (solo el solicitante, solo si está rechazada o cancelada — no la borra, sigue en Historial/Estadísticas)',
+  })
+  @ApiResponse({ status: 200, description: 'Solicitud archivada' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({
+    status: 403,
+    description: 'Solo el solicitante puede archivar su solicitud',
+  })
+  @ApiResponse({ status: 404, description: 'Solicitud no encontrada' })
+  @ApiResponse({
+    status: 409,
+    description: 'No se puede archivar en su estado actual',
+  })
+  archivar(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() usuario: AuthenticatedUser,
+  ) {
+    return this.solicitudesService.archivar(id, usuario);
+  }
+
+  @Patch(':id/desarchivar')
+  @ApiOperation({
+    summary: 'Restaurar la solicitud a "Mis solicitudes" (solo el solicitante)',
+  })
+  @ApiResponse({ status: 200, description: 'Solicitud restaurada' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({
+    status: 403,
+    description: 'Solo el solicitante puede restaurar su solicitud',
+  })
+  @ApiResponse({ status: 404, description: 'Solicitud no encontrada' })
+  desarchivar(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() usuario: AuthenticatedUser,
+  ) {
+    return this.solicitudesService.desarchivar(id, usuario);
+  }
+
+  @Delete('mias/archivadas')
+  @ApiOperation({
+    summary:
+      'Borrar definitivamente TODAS mis solicitudes archivadas (no se puede deshacer — también desaparecen de Historial/Estadísticas)',
+  })
+  @ApiResponse({ status: 200, description: '{ eliminadas: number }' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  async vaciarArchivadas(@CurrentUser() usuario: AuthenticatedUser) {
+    const eliminadas = await this.solicitudesService.vaciarArchivadas(usuario);
+    return { eliminadas };
   }
 }

@@ -20,6 +20,7 @@ import { FacultadesService } from '../services/facultades.service';
 import { CreateFacultadDto } from '../dto/facultad/create-facultad.dto';
 import { UpdateFacultadDto } from '../dto/facultad/update-facultad.dto';
 import { Roles } from 'src/auth/jwt/roles.decorator';
+import { resolvePagination } from 'src/common/pagination/pagination.util';
 
 @ApiTags('Facultades')
 @ApiBearerAuth()
@@ -45,11 +46,29 @@ export class FacultadesController {
     required: false,
     description: 'Filtra por nombre (contiene, sin distinguir mayúsculas)',
   })
-  @ApiOperation({ summary: 'Listar facultades activas (orden alfabético)' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description:
+      'Si se envía (junto con o sin `limit`), la respuesta es { data, meta }. Si se omiten ambos, devuelve el arreglo completo (lo usan los <select> de otras pantallas).',
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiOperation({
+    summary: 'Listar facultades activas (más recientes primero)',
+  })
   @ApiResponse({ status: 200, description: 'Listado de facultades' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
-  findAll(@Query('buscar') buscar?: string) {
-    return this.facultadesService.findAll(buscar);
+  findAll(
+    @Query('buscar') buscar?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pagination =
+      page || limit ? resolvePagination(page, limit) : undefined;
+    return pagination
+      ? this.facultadesService.findAll(buscar, pagination)
+      : this.facultadesService.findAll(buscar);
   }
 
   @Get(':id')
