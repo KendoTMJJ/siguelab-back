@@ -4,6 +4,9 @@
 /build
 /.pnpm-store
 
+# archivos subidos (disco local, no versionados)
+/uploads
+
 docs/
 # Logs
 logs

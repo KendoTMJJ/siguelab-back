@@ -6,6 +6,7 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
+  "transformIgnorePatterns": ["node_modules/(?!(.pnpm/)?uuid)"],
   "moduleNameMapper": {
     "^src/(.*)$": "<rootDir>/../src/$1",
     "^jwks-rsa$": "<rootDir>/mocks/jwks-rsa.ts"

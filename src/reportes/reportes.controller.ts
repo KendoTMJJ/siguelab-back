@@ -20,7 +20,7 @@ export class ReportesController {
   @Roles('admin', 'laboratorista')
   @ApiOperation({
     summary:
-      'Exporta el Excel de asistencias en laboratorios (reemplaza el archivo manual que alimenta Power BI vía Power Query)',
+      'Exporta el Excel de asistencias en laboratorios, para uso interno',
   })
   @ApiResponse({ status: 200, description: 'Archivo .xlsx' })
   @ApiResponse({ status: 401, description: 'No autenticado' })

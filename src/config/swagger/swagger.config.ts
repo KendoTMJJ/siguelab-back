@@ -42,6 +42,18 @@ export function setupSwagger(app: INestApplication): void {
       'Espacios físicos reservables y sus asociaciones con espacios académicos y docentes encargados',
     )
     .addTag(
+      'Equipos de laboratorio',
+      'Equipos individuales de laboratorios en modo fabricación digital (una fila por unidad física, con estado y calendario propios)',
+    )
+    .addTag(
+      'Servicios tecnológicos',
+      'Solicitud, cotización manual y ejecución de servicios (impresión 3D, corte láser, escaneo 3D, etc.) — el laboratorista opera el equipo y entrega el resultado, no es una reserva de espacio',
+    )
+    .addTag(
+      'Eventos de laboratorio',
+      'Capacitaciones, talleres, visitas y demás actividades que usan el espacio/equipos directamente (reserva parcial o total del laboratorio de fabricación digital)',
+    )
+    .addTag(
       'Horarios académicos',
       'Clases ya programadas que bloquean el calendario como reservas exclusivas',
     )
@@ -63,7 +75,7 @@ export function setupSwagger(app: INestApplication): void {
     )
     .addTag(
       'Reportes',
-      'Exportaciones para sistemas externos (ej. Excel de asistencias en laboratorios para Power BI)',
+      'Exportación del Excel de asistencias en laboratorios, para uso interno',
     )
     .build();
 

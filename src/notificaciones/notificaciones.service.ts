@@ -26,6 +26,23 @@ const ASUNTOS: Record<TipoEventoNotificacion, string> = {
     'Tu solicitud de reserva fue rechazada',
   [TipoEventoNotificacion.SOLICITUD_CANCELADA]:
     'Tu solicitud de reserva fue cancelada',
+  [TipoEventoNotificacion.SERVICIO_SOLICITADO]:
+    'Nueva solicitud de servicio técnico',
+  [TipoEventoNotificacion.SERVICIO_COTIZADO]:
+    'Tu servicio técnico ya tiene cotización',
+  [TipoEventoNotificacion.SERVICIO_APROBADO]:
+    'Cotización aprobada — servicio listo para programar',
+  [TipoEventoNotificacion.SERVICIO_RECHAZADO]: 'Cotización rechazada',
+  [TipoEventoNotificacion.SERVICIO_PROGRAMADO]:
+    'Tu servicio técnico ya tiene fecha y hora',
+  [TipoEventoNotificacion.SERVICIO_ENTREGADO]:
+    'Tu servicio técnico fue entregado',
+  [TipoEventoNotificacion.SERVICIO_CANCELADO]: 'Servicio técnico cancelado',
+  [TipoEventoNotificacion.EVENTO_SOLICITADO]:
+    'Nueva solicitud de evento especial',
+  [TipoEventoNotificacion.EVENTO_APROBADO]: 'Tu evento especial fue aprobado',
+  [TipoEventoNotificacion.EVENTO_RECHAZADO]: 'Tu evento especial fue rechazado',
+  [TipoEventoNotificacion.EVENTO_CANCELADO]: 'Evento especial cancelado',
 };
 
 /** Frase de introducción del correo, según el evento. */
@@ -42,6 +59,28 @@ const MENSAJES: Record<TipoEventoNotificacion, string> = {
     'Lamentamos informarte que tu solicitud de reserva fue rechazada.',
   [TipoEventoNotificacion.SOLICITUD_CANCELADA]:
     'Tu solicitud de reserva fue cancelada.',
+  [TipoEventoNotificacion.SERVICIO_SOLICITADO]:
+    'Alguien quiere usar el laboratorio: hay una nueva solicitud de servicio técnico esperando revisión y cotización.',
+  [TipoEventoNotificacion.SERVICIO_COTIZADO]:
+    'Ya armamos la cotización de tu servicio — entrá a revisarla y aprobarla o rechazarla.',
+  [TipoEventoNotificacion.SERVICIO_APROBADO]:
+    'El solicitante aprobó la cotización — el servicio ya se puede programar.',
+  [TipoEventoNotificacion.SERVICIO_RECHAZADO]:
+    'El solicitante rechazó la cotización.',
+  [TipoEventoNotificacion.SERVICIO_PROGRAMADO]:
+    'Tu servicio técnico ya tiene fecha y horario asignados.',
+  [TipoEventoNotificacion.SERVICIO_ENTREGADO]:
+    '¡Tu servicio técnico fue entregado! Ya puedes retirar el resultado.',
+  [TipoEventoNotificacion.SERVICIO_CANCELADO]:
+    'El servicio técnico fue cancelado.',
+  [TipoEventoNotificacion.EVENTO_SOLICITADO]:
+    'Alguien quiere usar el laboratorio: hay una nueva solicitud de evento especial esperando aprobación.',
+  [TipoEventoNotificacion.EVENTO_APROBADO]:
+    '¡Tu evento especial fue aprobado! Queda reservado para la fecha y el horario indicados.',
+  [TipoEventoNotificacion.EVENTO_RECHAZADO]:
+    'Lamentamos informarte que tu evento especial fue rechazado.',
+  [TipoEventoNotificacion.EVENTO_CANCELADO]:
+    'El evento especial fue cancelado.',
 };
 
 /** El color del encabezado cambia según el tono del evento (aprobado/rechazado/neutro). */
@@ -52,6 +91,17 @@ const COLOR_EVENTO: Record<TipoEventoNotificacion, string> = {
   [TipoEventoNotificacion.SOLICITUD_APROBADA]: '#0ca30c',
   [TipoEventoNotificacion.SOLICITUD_RECHAZADA]: '#d03b3b',
   [TipoEventoNotificacion.SOLICITUD_CANCELADA]: '#71717a',
+  [TipoEventoNotificacion.SERVICIO_SOLICITADO]: '#004f9f',
+  [TipoEventoNotificacion.SERVICIO_COTIZADO]: '#004f9f',
+  [TipoEventoNotificacion.SERVICIO_APROBADO]: '#0ca30c',
+  [TipoEventoNotificacion.SERVICIO_RECHAZADO]: '#d03b3b',
+  [TipoEventoNotificacion.SERVICIO_PROGRAMADO]: '#004f9f',
+  [TipoEventoNotificacion.SERVICIO_ENTREGADO]: '#0ca30c',
+  [TipoEventoNotificacion.SERVICIO_CANCELADO]: '#71717a',
+  [TipoEventoNotificacion.EVENTO_SOLICITADO]: '#004f9f',
+  [TipoEventoNotificacion.EVENTO_APROBADO]: '#0ca30c',
+  [TipoEventoNotificacion.EVENTO_RECHAZADO]: '#d03b3b',
+  [TipoEventoNotificacion.EVENTO_CANCELADO]: '#71717a',
 };
 
 /** Evita que texto libre (nombre de práctica, motivo) rompa el HTML del correo. */
@@ -140,10 +190,54 @@ export class NotificacionesService {
 
     return this.plantillaHtml(
       tipoEvento,
-      solicitud.idSolicitud,
+      `Solicitud #${solicitud.idSolicitud}`,
       filas,
       motivoRechazo,
     );
+  }
+
+  /**
+   * Inserta+envía para un origen que no es SolicitudReserva (servicio
+   * técnico o evento especial) — mismo mecanismo (fila de Notificacion +
+   * correo con plantilla, fallo de correo no revienta el flujo que lo
+   * disparó), pero el llamador arma el cuerpo (filas clave/valor) en vez de
+   * depender de los campos fijos de SolicitudReserva.
+   */
+  async notificarGenerico(
+    tipoEvento: TipoEventoNotificacion,
+    origen: { idServicio: number } | { idEvento: number },
+    destinatarios: DestinatarioNotificacion[],
+    refLabel: string,
+    filas: Array<{ etiqueta: string; valor: string }>,
+    motivo?: string,
+  ): Promise<void> {
+    for (const destinatario of destinatarios) {
+      const notificacion = this.notificacionRepository.create({
+        ...('idServicio' in origen
+          ? { idServicio: origen.idServicio }
+          : { idEvento: origen.idEvento }),
+        idDestinatario: destinatario.idUsuario,
+        tipoEvento,
+        estado: EstadoNotificacion.ENVIADA,
+      });
+      await this.notificacionRepository.save(notificacion);
+
+      try {
+        const cuerpo = this.plantillaHtml(tipoEvento, refLabel, filas, motivo);
+        await this.mailService.sendMail(
+          destinatario.correo,
+          ASUNTOS[tipoEvento],
+          cuerpo,
+        );
+      } catch (error) {
+        notificacion.estado = EstadoNotificacion.FALLIDA;
+        await this.notificacionRepository.save(notificacion);
+        this.logger.error(
+          `Fallo al enviar notificación ${tipoEvento} a ${destinatario.correo}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
   }
 
   /**
@@ -153,7 +247,7 @@ export class NotificacionesService {
    */
   private plantillaHtml(
     tipoEvento: TipoEventoNotificacion,
-    idSolicitud: number,
+    refLabel: string,
     filas: Array<{ etiqueta: string; valor: string }>,
     motivoRechazo?: string,
   ): string {
@@ -212,7 +306,7 @@ export class NotificacionesService {
             <td style="padding:8px 24px 4px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eceff3;border-radius:12px;overflow:hidden;">
                 <tr>
-                  <td colspan="2" style="padding:10px 16px;background:#f7f9fc;font-size:12px;color:#6b7280;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;">Solicitud #${idSolicitud}</td>
+                  <td colspan="2" style="padding:10px 16px;background:#f7f9fc;font-size:12px;color:#6b7280;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;">${refLabel}</td>
                 </tr>
                 ${filasHtml}
                 ${motivoHtml}

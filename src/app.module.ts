@@ -9,6 +9,10 @@ import { AuthModule } from './auth/auth.module';
 import { DirectorioModule } from './directorio/directorio.module';
 import { CatalogosModule } from './catalogos/catalogos.module';
 import { LaboratoriosModule } from './laboratorios/laboratorios.module';
+import { EquiposLaboratorioModule } from './equipos-laboratorio/equipos-laboratorio.module';
+import { ServiciosModule } from './servicios/servicios.module';
+import { ServiciosTecnologicosModule } from './servicios-tecnologicos/servicios-tecnologicos.module';
+import { EventosLaboratorioModule } from './eventos-laboratorio/eventos-laboratorio.module';
 import { HorariosAcademicosModule } from './horarios-academicos/horarios-academicos.module';
 import { NotificacionesModule } from './notificaciones/notificaciones.module';
 import { SolicitudesModule } from './solicitudes/solicitudes.module';
@@ -37,6 +41,10 @@ import { ThrottlerCustomGuard } from './auth/jwt/throttler-custom.guard';
     DirectorioModule,
     CatalogosModule,
     LaboratoriosModule,
+    EquiposLaboratorioModule,
+    ServiciosModule,
+    ServiciosTecnologicosModule,
+    EventosLaboratorioModule,
     HorariosAcademicosModule,
     NotificacionesModule,
     SolicitudesModule,

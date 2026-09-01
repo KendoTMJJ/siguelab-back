@@ -7,6 +7,7 @@ import {
   EstadoSolicitud,
   SolicitudReserva,
 } from 'src/solicitudes/entities/solicitud-reserva.entity';
+import { SolicitudesService } from 'src/solicitudes/solicitudes.service';
 import { RegistroUso } from './entities/registro-uso.entity';
 import { CreateRegistroUsoDto } from './dto/create-registro-uso.dto';
 import { UpdateRegistroUsoDto } from './dto/update-registro-uso.dto';
@@ -21,6 +22,10 @@ export interface FiltrosBitacora {
   fechaDesde?: string;
   fechaHasta?: string;
   idPeriodo?: number;
+  /** Contiene, sin distinguir mayúsculas, contra el nombre de la práctica de
+   * la solicitud enlazada — los registros sin solicitud (usos sin reserva)
+   * no tienen nombre de práctica, así que nunca coinciden con esto. */
+  buscar?: string;
 }
 
 @Injectable()
@@ -30,7 +35,10 @@ export class BitacoraService {
   private readonly laboratorioRepository: Repository<Laboratorio>;
   private readonly tipoReservaRepository: Repository<TipoReserva>;
 
-  constructor(private readonly dataSource: DataSource) {
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly solicitudesService: SolicitudesService,
+  ) {
     this.registroUsoRepository = this.dataSource.getRepository(RegistroUso);
     this.solicitudRepository = this.dataSource.getRepository(SolicitudReserva);
     this.laboratorioRepository = this.dataSource.getRepository(Laboratorio);
@@ -105,16 +113,28 @@ export class BitacoraService {
       observaciones: dto.observaciones ?? null,
     });
 
-    return this.registroUsoRepository.save(registro);
+    const guardado = await this.registroUsoRepository.save(registro);
+
+    // Cierra el flujo de la solicitud: antes de esto una solicitud aprobada
+    // se quedaba "aprobada" para siempre — ver SolicitudesService.marcarRealizada.
+    if (dto.idSolicitud) {
+      await this.solicitudesService.marcarRealizada(
+        dto.idSolicitud,
+        laboratorista.id,
+      );
+    }
+
+    return guardado;
   }
 
   /** registro_uso no tiene relación 1-a-N propia en el select (todas las
    * relaciones que trae son N-a-1: laboratorio, tipoReserva, laboratorista,
-   * solicitud), así que a diferencia del historial de solicitudes acá sí es
+   * solicitud), así que a diferencia del historial de solicitudes aquí sí es
    * seguro paginar con skip/take directamente sobre el query con joins. */
   async findAll(
     filtros: FiltrosBitacora,
     pagination: PaginationParams,
+    usuario: AuthenticatedUser,
   ): Promise<PaginatedResult<RegistroUso>> {
     const query = this.registroUsoRepository
       .createQueryBuilder('registro')
@@ -124,6 +144,18 @@ export class BitacoraService {
       .leftJoinAndSelect('registro.solicitud', 'solicitud')
       .orderBy('registro.fecha', 'DESC')
       .addOrderBy('registro.idRegistro', 'DESC');
+
+    // Docente/laboratorista ven solo su propia actividad; admin ve todo
+    // (mismo criterio que Historial/Estadísticas).
+    if (usuario.rol === 'docente') {
+      query.andWhere('solicitud.id_docente_encargado = :idUsuario', {
+        idUsuario: usuario.id,
+      });
+    } else if (usuario.rol === 'laboratorista') {
+      query.andWhere('registro.id_laboratorista = :idUsuario', {
+        idUsuario: usuario.id,
+      });
+    }
 
     if (filtros.idLaboratorio) {
       query.andWhere('registro.id_laboratorio = :idLaboratorio', {
@@ -147,6 +179,11 @@ export class BitacoraService {
         idPeriodo: filtros.idPeriodo,
       });
     }
+    if (filtros.buscar) {
+      query.andWhere('LOWER(solicitud.nombre_practica) LIKE LOWER(:buscar)', {
+        buscar: `%${filtros.buscar}%`,
+      });
+    }
 
     const [data, total] = await query
       .skip(pagination.skip)
@@ -165,7 +202,7 @@ export class BitacoraService {
    */
   /**
    * Igual que SolicitudesService.findAll: paginado en dos pasos. No es por
-   * el join 1-a-N acá (no hay ninguno en esta consulta) sino porque esta
+   * el join 1-a-N aquí (no hay ninguno en esta consulta) sino porque esta
    * versión de TypeORM no soporta un ORDER BY con subconsulta SQL cruda en
    * una query que hidrata entidades (getMany/getManyAndCount fallan con
    * "alias was not found" — ver createOrderByCombinedWithSelectExpression).
@@ -176,6 +213,10 @@ export class BitacoraService {
    */
   async pendientesPorRegistrar(
     pagination: PaginationParams,
+    idLaboratorio?: number,
+    fechaDesde?: string,
+    fechaHasta?: string,
+    buscar?: string,
   ): Promise<PaginatedResult<SolicitudReserva>> {
     const idQuery = this.solicitudRepository
       .createQueryBuilder('solicitud')
@@ -183,9 +224,36 @@ export class BitacoraService {
       .where('solicitud.estado = :estado', { estado: EstadoSolicitud.APROBADA })
       .andWhere(
         'NOT EXISTS (SELECT 1 FROM registro_uso registro WHERE registro.id_solicitud = solicitud.id_solicitud)',
-      )
+      );
+
+    if (idLaboratorio) {
+      // Filtra por el laboratorio que el laboratorista tiene físicamente
+      // enfrente — sin esto, si terminan varias clases de distintos
+      // laboratorios a la misma hora, todas aparecen mezcladas y no hay
+      // forma de saber cuál corresponde registrar primero.
+      idQuery.andWhere('solicitud.idLaboratorio = :idLaboratorio', {
+        idLaboratorio,
+      });
+    }
+    if (fechaDesde) {
+      idQuery.andWhere('solicitud.fechaPractica >= :fechaDesde', {
+        fechaDesde,
+      });
+    }
+    if (fechaHasta) {
+      idQuery.andWhere('solicitud.fechaPractica <= :fechaHasta', {
+        fechaHasta,
+      });
+    }
+    if (buscar) {
+      idQuery.andWhere('LOWER(solicitud.nombrePractica) LIKE LOWER(:buscar)', {
+        buscar: `%${buscar}%`,
+      });
+    }
+
+    idQuery
       // Orden por cuándo quedó aprobada (su último evento real), no por la
-      // fecha de la práctica: lo que importa acá es desde cuándo lleva
+      // fecha de la práctica: lo que importa aquí es desde cuándo lleva
       // esperando que alguien le registre el uso, igual que en
       // SolicitudesService.findPendientesDeMiFirma — una práctica lejana
       // aprobada hace mucho no debería quedar enterrada detrás de una
@@ -224,7 +292,7 @@ export class BitacoraService {
     return buildPaginatedResult(data, total, pagination.page, pagination.limit);
   }
 
-  async findOne(id: number): Promise<RegistroUso> {
+  async findOne(id: number, usuario: AuthenticatedUser): Promise<RegistroUso> {
     const registro = await this.registroUsoRepository.findOne({
       where: { idRegistro: id },
       relations: {
@@ -238,6 +306,17 @@ export class BitacoraService {
       throw new HttpException(
         'Registro de bitácora no encontrado',
         HttpStatus.NOT_FOUND,
+      );
+    }
+    if (
+      (usuario.rol === 'docente' &&
+        registro.solicitud?.idDocenteEncargado !== usuario.id) ||
+      (usuario.rol === 'laboratorista' &&
+        registro.idLaboratorista !== usuario.id)
+    ) {
+      throw new HttpException(
+        'No tienes acceso a este registro',
+        HttpStatus.FORBIDDEN,
       );
     }
     return registro;

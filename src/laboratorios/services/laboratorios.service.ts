@@ -1,8 +1,17 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, ILike, Repository } from 'typeorm';
-import { EstadoLaboratorio, Laboratorio } from '../entities/laboratorio.entity';
+import { DataSource, Repository } from 'typeorm';
+import {
+  EstadoLaboratorio,
+  Laboratorio,
+  ModoReservaLaboratorio,
+} from '../entities/laboratorio.entity';
 import { CreateLaboratorioDto } from '../dto/laboratorio/create-laboratorio.dto';
 import { UpdateLaboratorioDto } from '../dto/laboratorio/update-laboratorio.dto';
+import {
+  PaginatedResult,
+  buildPaginatedResult,
+} from 'src/common/pagination/paginated-result.interface';
+import { PaginationParams } from 'src/common/pagination/pagination.util';
 
 export interface FiltrosLaboratorios {
   estado?: EstadoLaboratorio;
@@ -34,6 +43,29 @@ export class LaboratoriosService {
     return laboratorio;
   }
 
+  /**
+   * El aforo solo tiene sentido en modo 'estandar' (cupos de SolicitudReserva)
+   * — en 'laboratorio_como_servicio' la disponibilidad es por equipo
+   * individual, así que se ignora aunque lo manden (nunca queda un aforo
+   * stale de cuando el laboratorio era estándar). En modo 'estandar' sigue
+   * siendo obligatorio, igual que antes.
+   */
+  private validarCapacidadPorModo(
+    modo: ModoReservaLaboratorio,
+    capacidad: number | null | undefined,
+  ): number | null {
+    if (modo === ModoReservaLaboratorio.LABORATORIO_COMO_SERVICIO) {
+      return null;
+    }
+    if (capacidad == null) {
+      throw new HttpException(
+        'La capacidad es obligatoria para laboratorios en modo estándar',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return capacidad;
+  }
+
   async create(
     createLaboratorioDto: CreateLaboratorioDto,
   ): Promise<Laboratorio> {
@@ -44,9 +76,19 @@ export class LaboratoriosService {
       );
     }
 
+    const modoReserva =
+      createLaboratorioDto.modoReserva ?? ModoReservaLaboratorio.ESTANDAR;
+    const capacidad = this.validarCapacidadPorModo(
+      modoReserva,
+      createLaboratorioDto.capacidad,
+    );
+
     try {
-      const laboratorio =
-        this.laboratorioRepository.create(createLaboratorioDto);
+      const laboratorio = this.laboratorioRepository.create({
+        ...createLaboratorioDto,
+        modoReserva,
+        capacidad,
+      });
       return this.limpiar(await this.laboratorioRepository.save(laboratorio));
     } catch {
       throw new HttpException(
@@ -56,34 +98,67 @@ export class LaboratoriosService {
     }
   }
 
+  /**
+   * Modo dual: ver comentario equivalente en DivisionesService.findAll — sin
+   * `pagination` devuelve el arreglo completo (lo usan los `<select>` de
+   * laboratorio en equipo-form, horario-form, etc.); con `pagination`
+   * devuelve `PaginatedResult`, para la pantalla de administración.
+   */
+  findAll(
+    filtros: FiltrosLaboratorios,
+    esAdmin: boolean,
+  ): Promise<Laboratorio[]>;
+  findAll(
+    filtros: FiltrosLaboratorios,
+    esAdmin: boolean,
+    pagination: PaginationParams,
+  ): Promise<PaginatedResult<Laboratorio>>;
   async findAll(
     filtros: FiltrosLaboratorios,
     esAdmin: boolean,
-  ): Promise<Laboratorio[]> {
+    pagination?: PaginationParams,
+  ): Promise<Laboratorio[] | PaginatedResult<Laboratorio>> {
     const usaFiltrosAdmin =
       esAdmin && (!!filtros.estado || !!filtros.incluirInactivos);
-    const filtroNombre = filtros.buscar
-      ? { nombre: ILike(`%${filtros.buscar}%`) }
-      : {};
 
-    let laboratorios: Laboratorio[];
+    const query = this.laboratorioRepository
+      .createQueryBuilder('laboratorio')
+      // Más reciente primero: el que se acaba de crear queda arriba de todo
+      // en vez de perderse en medio del alfabeto.
+      .orderBy('laboratorio.fechaCreacion', 'DESC');
+
     if (!usaFiltrosAdmin) {
-      laboratorios = await this.laboratorioRepository.find({
-        where: { estado: EstadoLaboratorio.ACTIVO, ...filtroNombre },
-        order: { nombre: 'ASC' },
+      query.andWhere('laboratorio.estado = :estado', {
+        estado: EstadoLaboratorio.ACTIVO,
       });
-    } else if (filtros.incluirInactivos) {
-      laboratorios = await this.laboratorioRepository.find({
-        where: { ...filtroNombre },
-        order: { nombre: 'ASC' },
-      });
-    } else {
-      laboratorios = await this.laboratorioRepository.find({
-        where: { estado: filtros.estado, ...filtroNombre },
-        order: { nombre: 'ASC' },
+    } else if (!filtros.incluirInactivos && filtros.estado) {
+      query.andWhere('laboratorio.estado = :estado', {
+        estado: filtros.estado,
       });
     }
-    return laboratorios.map((l) => this.limpiar(l));
+    // esAdmin && incluirInactivos: sin filtro de estado — trae todo.
+
+    if (filtros.buscar) {
+      query.andWhere('LOWER(laboratorio.nombre) LIKE LOWER(:buscar)', {
+        buscar: `%${filtros.buscar}%`,
+      });
+    }
+
+    if (!pagination) {
+      const laboratorios = await query.getMany();
+      return laboratorios.map((l) => this.limpiar(l));
+    }
+
+    const [data, total] = await query
+      .skip(pagination.skip)
+      .take(pagination.take)
+      .getManyAndCount();
+    return buildPaginatedResult(
+      data.map((l) => this.limpiar(l)),
+      total,
+      pagination.page,
+      pagination.limit,
+    );
   }
 
   async findOne(id: number): Promise<Laboratorio> {
@@ -123,7 +198,7 @@ export class LaboratoriosService {
     id: number,
     updateLaboratorioDto: UpdateLaboratorioDto,
   ): Promise<Laboratorio> {
-    await this.findOne(id);
+    const existente = await this.findOne(id);
 
     if (
       updateLaboratorioDto.nombre &&
@@ -135,10 +210,18 @@ export class LaboratoriosService {
       );
     }
 
+    const modoReserva =
+      updateLaboratorioDto.modoReserva ?? existente.modoReserva;
+    const capacidad = this.validarCapacidadPorModo(
+      modoReserva,
+      updateLaboratorioDto.capacidad ?? existente.capacidad,
+    );
+
     try {
       const laboratorio = await this.laboratorioRepository.preload({
         idLaboratorio: id,
         ...updateLaboratorioDto,
+        capacidad,
       });
       return this.limpiar(await this.laboratorioRepository.save(laboratorio!));
     } catch {

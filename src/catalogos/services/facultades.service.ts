@@ -1,9 +1,14 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, ILike, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Division } from '../entities/division.entity';
 import { Facultad } from '../entities/facultad.entity';
 import { CreateFacultadDto } from '../dto/facultad/create-facultad.dto';
 import { UpdateFacultadDto } from '../dto/facultad/update-facultad.dto';
+import {
+  PaginatedResult,
+  buildPaginatedResult,
+} from 'src/common/pagination/paginated-result.interface';
+import { PaginationParams } from 'src/common/pagination/pagination.util';
 
 @Injectable()
 export class FacultadesService {
@@ -38,11 +43,35 @@ export class FacultadesService {
     }
   }
 
-  findAll(buscar?: string): Promise<Facultad[]> {
-    return this.facultadRepository.find({
-      ...(buscar && { where: { nombre: ILike(`%${buscar}%`) } }),
-      order: { nombre: 'ASC' },
-    });
+  /** Modo dual: ver comentario equivalente en DivisionesService.findAll. */
+  findAll(buscar?: string): Promise<Facultad[]>;
+  findAll(
+    buscar: string | undefined,
+    pagination: PaginationParams,
+  ): Promise<PaginatedResult<Facultad>>;
+  async findAll(
+    buscar?: string,
+    pagination?: PaginationParams,
+  ): Promise<Facultad[] | PaginatedResult<Facultad>> {
+    const query = this.facultadRepository
+      .createQueryBuilder('facultad')
+      .orderBy('facultad.fechaCreacion', 'DESC');
+
+    if (buscar) {
+      query.andWhere('LOWER(facultad.nombre) LIKE LOWER(:buscar)', {
+        buscar: `%${buscar}%`,
+      });
+    }
+
+    if (!pagination) {
+      return query.getMany();
+    }
+
+    const [data, total] = await query
+      .skip(pagination.skip)
+      .take(pagination.take)
+      .getManyAndCount();
+    return buildPaginatedResult(data, total, pagination.page, pagination.limit);
   }
 
   async findOne(id: number): Promise<Facultad> {
@@ -79,8 +108,21 @@ export class FacultadesService {
     }
   }
 
+  /** Una división debe tener siempre al menos una facultad (ver
+   * CreateDivisionDto.facultades) — no se puede dejarla sin ninguna. */
   async remove(id: number): Promise<void> {
     const facultad = await this.findOne(id);
+
+    const totalEnDivision = await this.facultadRepository.count({
+      where: { idDivision: facultad.idDivision },
+    });
+    if (totalEnDivision <= 1) {
+      throw new HttpException(
+        'No se puede eliminar la última facultad de la división',
+        HttpStatus.CONFLICT,
+      );
+    }
+
     await this.facultadRepository.softRemove(facultad);
   }
 }

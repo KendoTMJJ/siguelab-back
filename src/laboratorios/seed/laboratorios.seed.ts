@@ -1,10 +1,13 @@
 import { DataSource } from 'typeorm';
-import { Laboratorio } from '../entities/laboratorio.entity';
+import {
+  Laboratorio,
+  ModoReservaLaboratorio,
+} from '../entities/laboratorio.entity';
 
 /**
  * Reemplaza el catálogo genérico anterior (11 labs "de área") por las 35
- * salas reales que exige el export de asistencias a Power BI (columna J del
- * Excel — ver GAP-REPORT.md / EXPORT-NOTES.md). Los nombres aquí van en
+ * salas reales que exige el Excel de asistencias en laboratorios (columna J
+ * del Excel — ver GAP-REPORT.md / EXPORT-NOTES.md). Los nombres aquí van en
  * mayúscula/minúscula normal para el resto de la UI (formularios,
  * calendario, etc.); la conversión a MAYÚSCULAS + NBSP final que exige el
  * Excel vive solo en `src/reportes/constantes/asistencias-excel.constants.ts`,
@@ -13,7 +16,11 @@ import { Laboratorio } from '../entities/laboratorio.entity';
  * Capacidad: el Excel no trae aforo por sala — se deja un valor por defecto
  * razonable (20) y el admin lo ajusta luego vía el CRUD de laboratorios.
  */
-const LABORATORIOS_BASE: Array<{ nombre: string; capacidad: number }> = [
+const LABORATORIOS_BASE: Array<{
+  nombre: string;
+  capacidad: number;
+  modoReserva?: ModoReservaLaboratorio;
+}> = [
   // Área: LAB ELECTRONICA
   { nombre: 'Digitales y Programación', capacidad: 20 },
   { nombre: 'Instrumentación Electrónica', capacidad: 20 },
@@ -64,7 +71,11 @@ const LABORATORIOS_BASE: Array<{ nombre: string; capacidad: number }> = [
   { nombre: 'Ecología', capacidad: 20 },
   // Sin área confirmada en el mensaje original (ver EXPORT-NOTES.md) —
   // asignada a LAB ELECTRONICA por afinidad temática, a confirmar.
-  { nombre: 'Fabricación Digital', capacidad: 20 },
+  {
+    nombre: 'Fabricación Digital',
+    capacidad: 20,
+    modoReserva: ModoReservaLaboratorio.LABORATORIO_COMO_SERVICIO,
+  },
 ];
 
 /**
@@ -79,6 +90,17 @@ export async function seedLaboratorios(dataSource: DataSource): Promise<void> {
     if (!existente) {
       await repo.save(repo.create(dato));
       console.log(`Laboratorio "${dato.nombre}" creado.`);
+      continue;
+    }
+
+    // Backfill: labs sembrados antes de que existiera modoReserva quedaron
+    // en 'estandar' por defecto — se corrige sin tocar el resto de sus datos.
+    if (dato.modoReserva && existente.modoReserva !== dato.modoReserva) {
+      existente.modoReserva = dato.modoReserva;
+      await repo.save(existente);
+      console.log(
+        `Laboratorio "${dato.nombre}" actualizado a modoReserva="${dato.modoReserva}".`,
+      );
     }
   }
 }

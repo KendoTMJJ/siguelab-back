@@ -1,8 +1,13 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, ILike, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { EspacioAcademico } from '../entities/espacio-academico.entity';
 import { CreateEspacioAcademicoDto } from '../dto/espacio-academico/create-espacio-academico.dto';
 import { UpdateEspacioAcademicoDto } from '../dto/espacio-academico/update-espacio-academico.dto';
+import {
+  PaginatedResult,
+  buildPaginatedResult,
+} from 'src/common/pagination/paginated-result.interface';
+import { PaginationParams } from 'src/common/pagination/pagination.util';
 
 @Injectable()
 export class EspaciosAcademicosService {
@@ -49,14 +54,41 @@ export class EspaciosAcademicosService {
     }
   }
 
-  async findAll(buscar?: string): Promise<EspacioAcademico[]> {
-    const espacios = buscar
-      ? await this.espacioRepository.find({
-          where: { nombre: ILike(`%${buscar}%`) },
-          order: { nombre: 'ASC' },
-        })
-      : await this.espacioRepository.find({ order: { nombre: 'ASC' } });
-    return espacios.map((e) => this.limpiar(e));
+  /** Modo dual: ver comentario equivalente en DivisionesService.findAll. */
+  findAll(buscar?: string): Promise<EspacioAcademico[]>;
+  findAll(
+    buscar: string | undefined,
+    pagination: PaginationParams,
+  ): Promise<PaginatedResult<EspacioAcademico>>;
+  async findAll(
+    buscar?: string,
+    pagination?: PaginationParams,
+  ): Promise<EspacioAcademico[] | PaginatedResult<EspacioAcademico>> {
+    const query = this.espacioRepository
+      .createQueryBuilder('espacio')
+      .orderBy('espacio.fechaCreacion', 'DESC');
+
+    if (buscar) {
+      query.andWhere('LOWER(espacio.nombre) LIKE LOWER(:buscar)', {
+        buscar: `%${buscar}%`,
+      });
+    }
+
+    if (!pagination) {
+      const espacios = await query.getMany();
+      return espacios.map((e) => this.limpiar(e));
+    }
+
+    const [data, total] = await query
+      .skip(pagination.skip)
+      .take(pagination.take)
+      .getManyAndCount();
+    return buildPaginatedResult(
+      data.map((e) => this.limpiar(e)),
+      total,
+      pagination.page,
+      pagination.limit,
+    );
   }
 
   async findOne(id: number): Promise<EspacioAcademico> {
