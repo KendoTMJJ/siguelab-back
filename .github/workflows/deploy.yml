@@ -1,0 +1,68 @@
+name: Desplegar backend
+
+# Se dispara con cada push a main — compila el NestJS y sube por FTP solo lo
+# necesario para correrlo (dist/, package.json, pnpm-lock.yaml). A propósito
+# NO sube node_modules: sin SSH no hay forma de correr "npm install" en el
+# servidor desde acá, así que esa parte se hace a mano, una sola vez, desde
+# cPanel → "Setup Node.js App" → "Run NPM Install" (y de nuevo solo cuando
+# cambien las dependencias, no en cada deploy).
+#
+# El reinicio de la app es automático: Passenger (el motor detrás de "Setup
+# Node.js App") reinicia el proceso solo con que el archivo tmp/restart.txt
+# cambie de fecha — por eso el último paso lo vuelve a subir siempre.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Instalar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Compilar
+        run: pnpm run build
+
+      - name: Preparar carpeta a subir
+        # Junta en un solo lugar exactamente lo que necesita el servidor —
+        # así el paso de FTP de abajo no tiene que andar filtrando archivos
+        # sueltos del repo (src/, test/, .env, etc.) uno por uno.
+        run: |
+          mkdir deploy
+          cp -r dist deploy/dist
+          cp package.json pnpm-lock.yaml deploy/
+          mkdir -p deploy/tmp
+          date > deploy/tmp/restart.txt
+
+      - name: Subir por FTP a cPanel
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: deploy/
+          # Tiene que ser EXACTAMENTE el "Application root" que te muestra
+          # cPanel en Setup Node.js App al crear la aplicación (ej.
+          # /home/usuario/siguelab-back) — no public_html.
+          server-dir: ${{ secrets.FTP_BACKEND_DIR }}
+          dangerous-clean-slate: false
+          exclude: |
+            **/node_modules/**
+            **/.env

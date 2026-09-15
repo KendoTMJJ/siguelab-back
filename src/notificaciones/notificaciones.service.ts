@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, LessThan, Repository } from 'typeorm';
 import { MailService } from 'src/mail/mail.service';
 import { SolicitudReserva } from 'src/solicitudes/entities/solicitud-reserva.entity';
 import {
@@ -13,7 +13,15 @@ export interface DestinatarioNotificacion {
   correo: string;
 }
 
+/** Cuántas veces reintentar un correo antes de darlo por `fallida`. */
+const MAX_INTENTOS = 3;
+/** Cuántas notificaciones pendientes procesa cada corrida del cron — un
+ * lote chico para no acaparar el proceso si se junta un pico. */
+const LOTE_MAXIMO = 20;
+
 const ASUNTOS: Record<TipoEventoNotificacion, string> = {
+  [TipoEventoNotificacion.SOLICITUD_ENVIADA]:
+    'Tu solicitud de reserva fue enviada',
   [TipoEventoNotificacion.SOLICITUD_CREADA]:
     'Nueva solicitud de reserva pendiente de tu firma',
   [TipoEventoNotificacion.PENDIENTE_FIRMA]:
@@ -47,6 +55,11 @@ const ASUNTOS: Record<TipoEventoNotificacion, string> = {
 
 /** Frase de introducción del correo, según el evento. */
 const MENSAJES: Record<TipoEventoNotificacion, string> = {
+  // Genérico a propósito: aplica tanto si crea un estudiante (sigue el
+  // docente) como si crea un docente directo (sigue el laboratorista, sin
+  // paso intermedio) — ver SolicitudesService.create.
+  [TipoEventoNotificacion.SOLICITUD_ENVIADA]:
+    'Tu solicitud de reserva se envió correctamente y quedó registrada, a la espera de la primera firma.',
   [TipoEventoNotificacion.SOLICITUD_CREADA]:
     'Recibiste una nueva solicitud de reserva que necesita tu firma como docente encargado.',
   [TipoEventoNotificacion.PENDIENTE_FIRMA]:
@@ -85,6 +98,7 @@ const MENSAJES: Record<TipoEventoNotificacion, string> = {
 
 /** El color del encabezado cambia según el tono del evento (aprobado/rechazado/neutro). */
 const COLOR_EVENTO: Record<TipoEventoNotificacion, string> = {
+  [TipoEventoNotificacion.SOLICITUD_ENVIADA]: '#004f9f',
   [TipoEventoNotificacion.SOLICITUD_CREADA]: '#004f9f',
   [TipoEventoNotificacion.PENDIENTE_FIRMA]: '#004f9f',
   [TipoEventoNotificacion.FIRMA_APROBADA]: '#004f9f',
@@ -132,9 +146,15 @@ export class NotificacionesService {
   }
 
   /**
-   * Inserta una notificación por destinatario y envía el correo. Si el
-   * correo falla, la fila queda `fallida` — el fallo NUNCA revienta la
-   * transacción de la solicitud que la disparó (se captura y loguea).
+   * Inserta una notificación por destinatario, en estado `pendiente` — el
+   * envío real del correo NO pasa acá. Antes este método esperaba (`await`)
+   * a que el SMTP terminara antes de devolver la respuesta HTTP al que
+   * creó/firmó/etc. la solicitud; con SMTP lento eso podía colgar el
+   * request varios segundos (o más) aunque la solicitud ya estuviera
+   * guardada. Ahora arma el correo (asunto + HTML, es trabajo síncrono, sin
+   * red) y lo deja listo en la tabla — `enviarPendientes()` (disparado por
+   * cron, ver NotificacionesScheduler) es quien de verdad lo manda, en otro
+   * momento, sin bloquear a nadie.
    */
   async notificar(
     tipoEvento: TipoEventoNotificacion,
@@ -142,31 +162,13 @@ export class NotificacionesService {
     destinatarios: DestinatarioNotificacion[],
     motivo?: string,
   ): Promise<void> {
-    for (const destinatario of destinatarios) {
-      const notificacion = this.notificacionRepository.create({
-        idSolicitud: solicitud.idSolicitud,
-        idDestinatario: destinatario.idUsuario,
-        tipoEvento,
-        estado: EstadoNotificacion.ENVIADA,
-      });
-      await this.notificacionRepository.save(notificacion);
-
-      try {
-        const cuerpo = this.construirCuerpo(tipoEvento, solicitud, motivo);
-        await this.mailService.sendMail(
-          destinatario.correo,
-          ASUNTOS[tipoEvento],
-          cuerpo,
-        );
-      } catch (error) {
-        notificacion.estado = EstadoNotificacion.FALLIDA;
-        await this.notificacionRepository.save(notificacion);
-        this.logger.error(
-          `Fallo al enviar notificación ${tipoEvento} a ${destinatario.correo}`,
-          error instanceof Error ? error.stack : undefined,
-        );
-      }
-    }
+    const cuerpoHtml = this.construirCuerpo(tipoEvento, solicitud, motivo);
+    await this.encolar(
+      tipoEvento,
+      { idSolicitud: solicitud.idSolicitud },
+      destinatarios,
+      cuerpoHtml,
+    );
   }
 
   private construirCuerpo(
@@ -197,11 +199,11 @@ export class NotificacionesService {
   }
 
   /**
-   * Inserta+envía para un origen que no es SolicitudReserva (servicio
-   * técnico o evento especial) — mismo mecanismo (fila de Notificacion +
-   * correo con plantilla, fallo de correo no revienta el flujo que lo
-   * disparó), pero el llamador arma el cuerpo (filas clave/valor) en vez de
-   * depender de los campos fijos de SolicitudReserva.
+   * Igual que `notificar()`, pero para un origen que no es SolicitudReserva
+   * (servicio técnico o evento especial) — el llamador arma el cuerpo
+   * (filas clave/valor) en vez de depender de los campos fijos de
+   * SolicitudReserva. También solo encola: el envío real lo hace
+   * `enviarPendientes()`.
    */
   async notificarGenerico(
     tipoEvento: TipoEventoNotificacion,
@@ -211,32 +213,70 @@ export class NotificacionesService {
     filas: Array<{ etiqueta: string; valor: string }>,
     motivo?: string,
   ): Promise<void> {
-    for (const destinatario of destinatarios) {
-      const notificacion = this.notificacionRepository.create({
-        ...('idServicio' in origen
-          ? { idServicio: origen.idServicio }
-          : { idEvento: origen.idEvento }),
+    const cuerpoHtml = this.plantillaHtml(tipoEvento, refLabel, filas, motivo);
+    await this.encolar(tipoEvento, origen, destinatarios, cuerpoHtml);
+  }
+
+  /** Inserta una fila `pendiente` por destinatario — compartido por
+   * `notificar()` y `notificarGenerico()`. */
+  private async encolar(
+    tipoEvento: TipoEventoNotificacion,
+    origen:
+      { idSolicitud: number } | { idServicio: number } | { idEvento: number },
+    destinatarios: DestinatarioNotificacion[],
+    cuerpoHtml: string,
+  ): Promise<void> {
+    const notificaciones = destinatarios.map((destinatario) =>
+      this.notificacionRepository.create({
+        ...origen,
         idDestinatario: destinatario.idUsuario,
         tipoEvento,
-        estado: EstadoNotificacion.ENVIADA,
-      });
-      await this.notificacionRepository.save(notificacion);
+        asunto: ASUNTOS[tipoEvento],
+        cuerpoHtml,
+        estado: EstadoNotificacion.PENDIENTE,
+      }),
+    );
+    await this.notificacionRepository.save(notificaciones);
+  }
 
+  /**
+   * El worker de verdad — lo dispara NotificacionesScheduler por cron.
+   * Toma un lote de notificaciones `pendientes`, intenta mandarlas, y
+   * actualiza cada una a `enviada` o, si se agotaron los reintentos, a
+   * `fallida`. Un fallo acá nunca vuelve a tocar la solicitud/servicio/
+   * evento que la generó — esa parte ya terminó hace rato.
+   */
+  async enviarPendientes(): Promise<void> {
+    const pendientes = await this.notificacionRepository.find({
+      where: {
+        estado: EstadoNotificacion.PENDIENTE,
+        intentos: LessThan(MAX_INTENTOS),
+      },
+      relations: { destinatario: true },
+      order: { idNotificacion: 'ASC' },
+      take: LOTE_MAXIMO,
+    });
+
+    for (const notificacion of pendientes) {
       try {
-        const cuerpo = this.plantillaHtml(tipoEvento, refLabel, filas, motivo);
         await this.mailService.sendMail(
-          destinatario.correo,
-          ASUNTOS[tipoEvento],
-          cuerpo,
+          notificacion.destinatario.correo,
+          notificacion.asunto,
+          notificacion.cuerpoHtml,
         );
+        notificacion.estado = EstadoNotificacion.ENVIADA;
       } catch (error) {
-        notificacion.estado = EstadoNotificacion.FALLIDA;
-        await this.notificacionRepository.save(notificacion);
+        notificacion.intentos += 1;
+        notificacion.estado =
+          notificacion.intentos >= MAX_INTENTOS
+            ? EstadoNotificacion.FALLIDA
+            : EstadoNotificacion.PENDIENTE;
         this.logger.error(
-          `Fallo al enviar notificación ${tipoEvento} a ${destinatario.correo}`,
+          `Fallo al enviar notificación #${notificacion.idNotificacion} (${notificacion.tipoEvento}) a ${notificacion.destinatario.correo} — intento ${notificacion.intentos}/${MAX_INTENTOS}`,
           error instanceof Error ? error.stack : undefined,
         );
       }
+      await this.notificacionRepository.save(notificacion);
     }
   }
 

@@ -6,7 +6,9 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
-  "transformIgnorePatterns": ["node_modules/(?!(.pnpm/)?uuid)"],
+  "transformIgnorePatterns": [
+    "node_modules/(?!(\\.pnpm/)?(uuid|@nestjs\\+schedule|@nestjs/schedule))"
+  ],
   "maxWorkers": 1,
   "moduleNameMapper": {
     "^src/(.*)$": "<rootDir>/../src/$1",

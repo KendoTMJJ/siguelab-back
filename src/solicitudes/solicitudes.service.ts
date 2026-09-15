@@ -572,6 +572,17 @@ export class SolicitudesService {
       },
     );
 
+    // Confirmación al propio solicitante — sin importar quién crea la
+    // reserva (estudiante o docente) ni a quién le toca firmar después. Va
+    // primero y separado del resto: antes solo se avisaba a quien tenía que
+    // firmar/gestionar, y quien creó la reserva no tenía forma de saber por
+    // correo que sí se había enviado.
+    await this.notificacionesService.notificar(
+      TipoEventoNotificacion.SOLICITUD_ENVIADA,
+      solicitudCreada,
+      [{ idUsuario: solicitante.id, correo: solicitante.correo }],
+    );
+
     if (estadoInicial === EstadoSolicitud.PENDIENTE_DOCENTE) {
       const docente = await this.usuarioRepository.findOne({
         where: { idUsuario: dto.idDocenteEncargado },

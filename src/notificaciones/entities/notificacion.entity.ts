@@ -12,6 +12,11 @@ import { ServicioTecnologico } from 'src/servicios-tecnologicos/entities/servici
 import { EventoLaboratorio } from 'src/eventos-laboratorio/entities/evento-laboratorio.entity';
 
 export enum TipoEventoNotificacion {
+  /** Confirmación al propio solicitante de que su reserva se envió y quedó
+   * registrada — se manda siempre, sin importar quién la crea (estudiante o
+   * docente). Distinta de SOLICITUD_CREADA, que es el aviso AL docente de
+   * que tiene algo para firmar (esa solo aplica cuando crea un estudiante). */
+  SOLICITUD_ENVIADA = 'solicitud_enviada',
   SOLICITUD_CREADA = 'solicitud_creada',
   PENDIENTE_FIRMA = 'pendiente_firma',
   FIRMA_APROBADA = 'firma_aprobada',
@@ -32,8 +37,12 @@ export enum TipoEventoNotificacion {
 }
 
 export enum EstadoNotificacion {
+  /** Recién insertada, todavía no se intentó mandar el correo — la toma el
+   * worker (ver NotificacionesService.enviarPendientes, disparado por cron). */
+  PENDIENTE = 'pendiente',
   ENVIADA = 'enviada',
   LEIDA = 'leida',
+  /** Se agotaron los reintentos (ver MAX_INTENTOS) sin lograr enviarla. */
   FALLIDA = 'fallida',
 }
 
@@ -76,13 +85,26 @@ export class Notificacion {
   @Column({ name: 'tipo_evento', length: 40 })
   tipoEvento!: string;
 
+  /** Asunto y cuerpo ya renderizados en el momento de crear la solicitud
+   * (es trabajo síncrono, no necesita red) — el worker que manda el correo
+   * corre después, en otro momento, y ya no tiene en memoria los datos de
+   * la solicitud/servicio/evento para reconstruirlos. */
+  @Column({ length: 150 })
+  asunto!: string;
+
+  @Column({ name: 'cuerpo_html', type: 'text' })
+  cuerpoHtml!: string;
+
+  @Column({ default: 0 })
+  intentos!: number;
+
   @CreateDateColumn({ name: 'fecha_envio' })
   fechaEnvio!: Date;
 
   @Column({
     type: 'enum',
     enum: EstadoNotificacion,
-    default: EstadoNotificacion.ENVIADA,
+    default: EstadoNotificacion.PENDIENTE,
   })
   estado!: EstadoNotificacion;
 }

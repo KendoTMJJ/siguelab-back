@@ -186,7 +186,12 @@ export class ServiciosTecnologicosController {
   ) {
     const { ruta, nombreOriginal } =
       await this.serviciosTecnologicosService.obtenerArchivo(id, usuario);
-    res.download(ruta, nombreOriginal);
+    // Ver el mismo comentario en EquiposLaboratorioController — sin esto,
+    // res.download deja la respuesta cacheable por defecto.
+    res.download(ruta, nombreOriginal, {
+      cacheControl: false,
+      headers: { 'Cache-Control': 'no-store' },
+    });
   }
 
   @Delete(':id/archivo')

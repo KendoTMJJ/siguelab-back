@@ -39,6 +39,10 @@ export class ReportesController {
       'Content-Type':
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${nombreArchivo}"`,
+      // Es un reporte generado al vuelo con los filtros de la query — sin
+      // esto, un proxy/CDN podría cachearlo por URL y devolver un Excel
+      // desactualizado si alguien pide los mismos filtros más tarde.
+      'Cache-Control': 'no-store',
     });
     return new StreamableFile(buffer);
   }

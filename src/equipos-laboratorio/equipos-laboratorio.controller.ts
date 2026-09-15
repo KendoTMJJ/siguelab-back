@@ -157,8 +157,14 @@ export class EquiposLaboratorioController {
   ) {
     const { ruta, nombreOriginal, mimeType } =
       await this.equiposLaboratorioService.obtenerFichaTecnica(id);
+    // cacheControl:false + Cache-Control:no-store — sin esto, res.download
+    // (vía res.sendFile) activa cacheo por defecto (ETag/Last-Modified/
+    // Accept-Ranges, pensado para estáticos). Un proxy/CDN intermedio podía
+    // guardar la respuesta por URL y, si un envío quedaba corrupto o
+    // truncado, seguir sirviendo esa copia corrupta a todos después.
     res.download(ruta, nombreOriginal, {
-      headers: { 'Content-Type': mimeType },
+      cacheControl: false,
+      headers: { 'Content-Type': mimeType, 'Cache-Control': 'no-store' },
     });
   }
 
