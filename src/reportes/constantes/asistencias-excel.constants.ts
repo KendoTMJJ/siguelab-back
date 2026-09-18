@@ -150,9 +150,11 @@ export const OBSERVACIONES_LISTA_CERRADA: readonly string[] = [
   'Circunstancia no prevista',
 ];
 
-/** `registro_uso.novedad` (BD, texto libre) → valor de "Observaciones". */
-export function observacionExcel(novedad: string | null | undefined): string {
-  const limpio = (novedad ?? '').trim();
+/** `registro_uso.observaciones` (BD) → valor de "Observaciones" del Excel. */
+export function observacionExcel(
+  observaciones: string | null | undefined,
+): string {
+  const limpio = (observaciones ?? '').trim();
   return limpio.length > 0 ? limpio : 'Ninguno';
 }
 

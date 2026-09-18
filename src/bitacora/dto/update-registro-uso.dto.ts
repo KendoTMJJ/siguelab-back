@@ -1,13 +1,16 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsDateString,
+  IsIn,
   IsInt,
   IsOptional,
-  IsString,
   Matches,
   Min,
-  MaxLength,
 } from 'class-validator';
+import {
+  OBSERVACIONES_LISTA_CERRADA,
+  USO_LABORATORIO_LISTA_CERRADA,
+} from 'src/reportes/constantes/asistencias-excel.constants';
 
 const HORA_REGEX = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 
@@ -50,14 +53,13 @@ export class UpdateRegistroUsoDto {
   @Min(0)
   numAsistentes?: number;
 
-  @ApiPropertyOptional({ example: 'Clase cancelada', maxLength: 60 })
+  @ApiPropertyOptional({ example: 'Ninguno', enum: OBSERVACIONES_LISTA_CERRADA })
   @IsOptional()
-  @IsString()
-  @MaxLength(60)
-  novedad?: string;
-
-  @ApiPropertyOptional({ example: 'Se reprogramó para la próxima semana' })
-  @IsOptional()
-  @IsString()
+  @IsIn(OBSERVACIONES_LISTA_CERRADA)
   observaciones?: string;
+
+  @ApiPropertyOptional({ example: 'Docencia', enum: USO_LABORATORIO_LISTA_CERRADA })
+  @IsOptional()
+  @IsIn(USO_LABORATORIO_LISTA_CERRADA)
+  usoLaboratorio?: string;
 }

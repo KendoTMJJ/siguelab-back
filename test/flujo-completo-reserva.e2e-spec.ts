@@ -25,8 +25,15 @@ import { EspacioLaboratorio } from '../src/laboratorios/entities/espacio-laborat
 import { DocenteLaboratorio } from '../src/laboratorios/entities/docente-laboratorio.entity';
 import { LaboratoristaLaboratorio } from '../src/laboratorios/entities/laboratorista-laboratorio.entity';
 import { HorarioAcademico } from '../src/horarios-academicos/entities/horario-academico.entity';
-import { SolicitudReserva } from '../src/solicitudes/entities/solicitud-reserva.entity';
-import { Firma } from '../src/solicitudes/entities/firma.entity';
+import {
+  EstadoSolicitud,
+  SolicitudReserva,
+} from '../src/solicitudes/entities/solicitud-reserva.entity';
+import {
+  Firma,
+  ResultadoFirma,
+  RolFirmante,
+} from '../src/solicitudes/entities/firma.entity';
 import { SolicitudEvento } from '../src/solicitudes/entities/solicitud-evento.entity';
 import { RegistroUso } from '../src/bitacora/entities/registro-uso.entity';
 import { Notificacion } from '../src/notificaciones/entities/notificacion.entity';
@@ -96,6 +103,12 @@ describe('Flujo completo de reserva (e2e)', () => {
   let docente: Usuario;
   let estudiante: Usuario;
   let laboratorista: Usuario;
+  /** Asociado al MISMO laboratorio que `laboratorista`, pero nunca elegido
+   * como encargado de ninguna solicitud — existe solo para probar que la
+   * notificación de "pendiente de firma" le llega ÚNICAMENTE al laboratorista
+   * encargado, no a todo el que esté asociado al laboratorio (ver el test
+   * "la notificación de pendiente_firma..."). */
+  let laboratoristaSecundario: Usuario;
 
   // Recursos creados a lo largo del flujo
   let idDivision: number;
@@ -107,6 +120,8 @@ describe('Flujo completo de reserva (e2e)', () => {
   let idHorario: number;
   let idSolicitud: number;
   let idRegistro: number;
+  let idLaboratorioSinLaboratorista: number;
+  let idSolicitudSinLaboratorista: number;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -190,6 +205,15 @@ describe('Flujo completo de reserva (e2e)', () => {
       }),
     ]);
 
+    laboratoristaSecundario = await usuarioRepo.save(
+      usuarioRepo.create({
+        nombre: `E2E Laboratorista Secundario ${sufijo}`,
+        correo: `e2e-laboratorista-secundario-${sufijo}@test.local`,
+        rol: rolLaboratorista,
+        estado: EstadoUsuario.ACTIVO,
+      }),
+    );
+
     const tipoPracticaLibre = await dataSource
       .getRepository(TipoReserva)
       .findOneByOrFail({ nombre: 'Práctica libre' });
@@ -201,6 +225,31 @@ describe('Flujo completo de reserva (e2e)', () => {
     // creó (usuarios/división/laboratorio/periodo con sufijo único), nunca
     // el catálogo base (roles, tipos de reserva) que ya traía la base.
     try {
+      if (idSolicitudSinLaboratorista) {
+        await dataSource
+          .getRepository(Notificacion)
+          .delete({ idSolicitud: idSolicitudSinLaboratorista });
+        await dataSource
+          .getRepository(SolicitudEvento)
+          .delete({ idSolicitud: idSolicitudSinLaboratorista });
+        await dataSource
+          .getRepository(Firma)
+          .delete({ idSolicitud: idSolicitudSinLaboratorista });
+        await dataSource
+          .getRepository(SolicitudReserva)
+          .delete({ idSolicitud: idSolicitudSinLaboratorista });
+      }
+      if (idLaboratorioSinLaboratorista) {
+        await dataSource
+          .getRepository(DocenteLaboratorio)
+          .delete({ idLaboratorio: idLaboratorioSinLaboratorista });
+        await dataSource
+          .getRepository(LaboratoristaLaboratorio)
+          .delete({ idLaboratorio: idLaboratorioSinLaboratorista });
+        await dataSource
+          .getRepository(Laboratorio)
+          .delete({ idLaboratorio: idLaboratorioSinLaboratorista });
+      }
       if (idLaboratorio) {
         await dataSource.getRepository(RegistroUso).delete({ idLaboratorio });
       }
@@ -246,6 +295,7 @@ describe('Flujo completo de reserva (e2e)', () => {
           docente.idUsuario,
           estudiante.idUsuario,
           laboratorista.idUsuario,
+          laboratoristaSecundario.idUsuario,
         ]);
     } finally {
       jest.restoreAllMocks();
@@ -342,7 +392,7 @@ describe('Flujo completo de reserva (e2e)', () => {
     );
   });
 
-  it('admin asocia el laboratorista a cargo del laboratorio (trazabilidad)', async () => {
+  it('admin asocia el laboratorista a cargo del laboratorio (define quién puede firmar/gestionar sus solicitudes)', async () => {
     await as(admin.idUsuario)
       .post(`/laboratorios/${idLaboratorio}/laboratoristas-encargados`)
       .send({ idUsuario: laboratorista.idUsuario })
@@ -354,6 +404,13 @@ describe('Flujo completo de reserva (e2e)', () => {
     expect(res.body.map((l: { idUsuario: string }) => l.idUsuario)).toContain(
       laboratorista.idUsuario,
     );
+
+    // Ver el comentario de laboratoristaSecundario: asociado al mismo
+    // laboratorio, pero nunca va a ser el encargado de una solicitud.
+    await as(admin.idUsuario)
+      .post(`/laboratorios/${idLaboratorio}/laboratoristas-encargados`)
+      .send({ idUsuario: laboratoristaSecundario.idUsuario })
+      .expect(201);
   });
 
   it('admin crea un horario académico para el laboratorio', async () => {
@@ -384,10 +441,14 @@ describe('Flujo completo de reserva (e2e)', () => {
       .post('/solicitudes')
       .send({
         idDocenteEncargado: docente.idUsuario,
+        idLaboratoristaEncargado: laboratorista.idUsuario,
         idLaboratorio,
         idTipo: idTipoPracticaLibre,
+        idEspacio,
         idFacultad,
         idPeriodo,
+        grupoAsignatura: 'G1',
+        numGruposTrabajo: 1,
         fechaPractica: isoDate(fechaPractica),
         horaInicio: '10:00',
         horaFin: '11:00',
@@ -408,6 +469,22 @@ describe('Flujo completo de reserva (e2e)', () => {
       .expect(201);
 
     expect(res.body.estado).toBe('pendiente_laboratorista');
+  });
+
+  it('la notificación de "pendiente de firma" le llega SOLO al laboratorista encargado, no a laboratoristaSecundario (mismo laboratorio)', async () => {
+    const notificaciones = await dataSource.getRepository(Notificacion).find({
+      where: { idSolicitud, tipoEvento: 'pendiente_firma' },
+    });
+
+    expect(notificaciones).toHaveLength(1);
+    expect(notificaciones[0].idDestinatario).toBe(laboratorista.idUsuario);
+  });
+
+  it('el laboratorista encargado no puede firmar otro que no sea él (laboratoristaSecundario recibe 403)', async () => {
+    await as(laboratoristaSecundario.idUsuario)
+      .post(`/solicitudes/${idSolicitud}/firmar`)
+      .send({})
+      .expect(403);
   });
 
   it('laboratorista firma (la solicitud queda aprobada)', async () => {
@@ -433,8 +510,8 @@ describe('Flujo completo de reserva (e2e)', () => {
         horaInicioReal: '10:05',
         horaFinReal: '10:55',
         numAsistentes: 5,
-        novedad: 'Ninguno',
-        observaciones: 'Sesión sin novedad (e2e)',
+        observaciones: 'Ninguno',
+        usoLaboratorio: 'Prácticas Libres',
       })
       .expect(201);
 
@@ -456,5 +533,158 @@ describe('Flujo completo de reserva (e2e)', () => {
       .expect(200);
 
     expect(res.body.archivada).toBe(true);
+  });
+
+  describe('laboratorio sin ningún laboratorista asignado', () => {
+    it('setup: laboratorio nuevo con docente asociado pero sin laboratorista', async () => {
+      const labRes = await as(admin.idUsuario)
+        .post('/laboratorios')
+        .send({
+          nombre: `Laboratorio sin laboratorista E2E ${sufijo}`,
+          capacidad: 20,
+          modoReserva: 'estandar',
+        })
+        .expect(201);
+      idLaboratorioSinLaboratorista = labRes.body.idLaboratorio;
+
+      await as(admin.idUsuario)
+        .post(
+          `/laboratorios/${idLaboratorioSinLaboratorista}/docentes-encargados`,
+        )
+        .send({ idUsuario: docente.idUsuario })
+        .expect(201);
+
+      // idEspacio es obligatorio para cualquier tipo de reserva (formato
+      // EATUF) — se asocia acá también para que el test de abajo llegue a
+      // probar lo que le interesa (falta de laboratorista), no se quede
+      // corto antes en la validación de espacio académico.
+      await as(admin.idUsuario)
+        .post(`/laboratorios/${idLaboratorioSinLaboratorista}/espacios-academicos`)
+        .send({ idEspacio })
+        .expect(201);
+    });
+
+    it('POST /solicitudes ya no deja crear nada ahí: no hay ningún laboratorista que se pueda elegir como encargado', async () => {
+      const fechaPractica = new Date();
+      fechaPractica.setDate(fechaPractica.getDate() + 6);
+
+      // laboratorista sí existe y sí es laboratorista — pero no está
+      // asociado a ESTE laboratorio (que no tiene ninguno asociado), así
+      // que la validación de idLaboratoristaEncargado en create() lo rechaza.
+      await as(estudiante.idUsuario)
+        .post('/solicitudes')
+        .send({
+          idDocenteEncargado: docente.idUsuario,
+          idLaboratoristaEncargado: laboratorista.idUsuario,
+          idLaboratorio: idLaboratorioSinLaboratorista,
+          idTipo: idTipoPracticaLibre,
+          idEspacio,
+          idFacultad,
+          idPeriodo,
+          grupoAsignatura: 'G1',
+          numGruposTrabajo: 1,
+          fechaPractica: isoDate(fechaPractica),
+          horaInicio: '10:00',
+          horaFin: '11:00',
+          nombrePractica: `Práctica sin laboratorista E2E ${sufijo}`,
+          numPersonas: 5,
+        })
+        .expect(400);
+    });
+
+    /**
+     * A partir de acá se prueba el fallback para filas LEGACY (creadas antes
+     * de existir idLaboratoristaEncargado, ver el comentario en la entidad):
+     * el test anterior ya probó que POST /solicitudes no puede producir una
+     * fila así hoy (el campo es obligatorio y se valida) — así que para
+     * ejercitar ese fallback hay que insertar la fila directo por
+     * repositorio, simulando el estado real de una solicitud vieja.
+     */
+    it('setup legacy: inserta directo por repositorio una solicitud pendiente_laboratorista SIN encargado (simula una fila anterior a este campo)', async () => {
+      const fechaPractica = new Date();
+      fechaPractica.setDate(fechaPractica.getDate() + 6);
+
+      const solicitud = await dataSource.getRepository(SolicitudReserva).save(
+        dataSource.getRepository(SolicitudReserva).create({
+          idSolicitante: estudiante.idUsuario,
+          idDocenteEncargado: docente.idUsuario,
+          idLaboratoristaEncargado: null,
+          idLaboratorio: idLaboratorioSinLaboratorista,
+          idTipo: idTipoPracticaLibre,
+          idFacultad,
+          idPeriodo,
+          fechaPractica: isoDate(fechaPractica),
+          horaInicio: '10:00:00',
+          horaFin: '11:00:00',
+          nombrePractica: `Práctica legacy sin laboratorista E2E ${sufijo}`,
+          numPersonas: 5,
+          estado: EstadoSolicitud.PENDIENTE_LABORATORISTA,
+        }),
+      );
+      idSolicitudSinLaboratorista = solicitud.idSolicitud;
+
+      await dataSource.getRepository(Firma).save([
+        dataSource.getRepository(Firma).create({
+          idSolicitud: solicitud.idSolicitud,
+          orden: 1,
+          rolFirmante: RolFirmante.DOCENTE,
+          idFirmante: docente.idUsuario,
+          resultado: ResultadoFirma.APROBADA,
+          fechaHora: new Date(),
+        }),
+        dataSource.getRepository(Firma).create({
+          idSolicitud: solicitud.idSolicitud,
+          orden: 2,
+          rolFirmante: RolFirmante.LABORATORISTA,
+          resultado: ResultadoFirma.PENDIENTE,
+        }),
+      ]);
+    });
+
+    it('nadie puede firmarla todavía: un laboratorista no asociado a este laboratorio recibe 403', async () => {
+      await as(laboratorista.idUsuario)
+        .post(`/solicitudes/${idSolicitudSinLaboratorista}/firmar`)
+        .send({})
+        .expect(403);
+    });
+
+    it('nadie puede rechazarla todavía: un laboratorista no asociado a este laboratorio recibe 403', async () => {
+      await as(laboratorista.idUsuario)
+        .post(`/solicitudes/${idSolicitudSinLaboratorista}/rechazar`)
+        .send({ motivo: 'No debería poder (e2e)' })
+        .expect(403);
+    });
+
+    it('no aparece en la bandeja de pendientes de un laboratorista no asociado', async () => {
+      const res = await as(laboratorista.idUsuario)
+        .get('/solicitudes/pendientes-de-mi-firma')
+        .expect(200);
+
+      const ids = res.body.map((s: { idSolicitud: number }) => s.idSolicitud);
+      expect(ids).not.toContain(idSolicitudSinLaboratorista);
+    });
+
+    it('una vez asociado al laboratorio, cualquier laboratorista de ahí sí puede firmarla (fallback de fila legacy)', async () => {
+      await as(admin.idUsuario)
+        .post(
+          `/laboratorios/${idLaboratorioSinLaboratorista}/laboratoristas-encargados`,
+        )
+        .send({ idUsuario: laboratorista.idUsuario })
+        .expect(201);
+
+      const pendientes = await as(laboratorista.idUsuario)
+        .get('/solicitudes/pendientes-de-mi-firma')
+        .expect(200);
+      expect(
+        pendientes.body.map((s: { idSolicitud: number }) => s.idSolicitud),
+      ).toContain(idSolicitudSinLaboratorista);
+
+      const res = await as(laboratorista.idUsuario)
+        .post(`/solicitudes/${idSolicitudSinLaboratorista}/firmar`)
+        .send({})
+        .expect(201);
+
+      expect(res.body.estado).toBe('aprobada');
+    });
   });
 });

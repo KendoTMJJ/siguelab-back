@@ -41,12 +41,35 @@ export class SolicitudReserva {
   @JoinColumn({ name: 'id_solicitante' })
   solicitante!: Usuario;
 
-  @Column({ name: 'id_docente_encargado', type: 'uuid' })
-  idDocenteEncargado!: string;
+  /** Null SOLO para el tipo "Evento especial" (esExclusiva, creado por
+   * admin/laboratorista vía crearDirectaLote) — no tiene un docente
+   * académico asociado. Para cualquier otra reserva sigue siendo
+   * obligatorio: create()/crearDirecta() lo exigen en su DTO
+   * (@IsUUID() sin @IsOptional()), así que ningún otro camino de creación
+   * puede dejarlo en null. Todo lector debe tratarlo como opcional
+   * (`docenteEncargado?.nombre ?? '—'`, mismo criterio que ya usa
+   * historial.ts). */
+  @Column({ name: 'id_docente_encargado', type: 'uuid', nullable: true })
+  idDocenteEncargado!: string | null;
 
-  @ManyToOne(() => Usuario)
+  @ManyToOne(() => Usuario, { nullable: true })
   @JoinColumn({ name: 'id_docente_encargado' })
-  docenteEncargado!: Usuario;
+  docenteEncargado?: Usuario | null;
+
+  /** Laboratorista elegido al crear la solicitud (mismo criterio que
+   * idDocenteEncargado: obligatorio en create(), ver CreateSolicitudDto).
+   * Nullable por dos motivos — evento especial (nunca lo tiene, igual que
+   * idDocenteEncargado) y solicitudes creadas ANTES de este campo (filas
+   * legacy): SolicitudesService.firmar/rechazar/findPendientesDeMiFirma
+   * caen de vuelta al criterio anterior (cualquier laboratorista asociado
+   * al laboratorio) solo cuando esto es null, para no dejar huérfanas las
+   * solicitudes pendientes que ya existían. */
+  @Column({ name: 'id_laboratorista_encargado', type: 'uuid', nullable: true })
+  idLaboratoristaEncargado!: string | null;
+
+  @ManyToOne(() => Usuario, { nullable: true })
+  @JoinColumn({ name: 'id_laboratorista_encargado' })
+  laboratoristaEncargado?: Usuario | null;
 
   @Column({ name: 'id_laboratorio' })
   idLaboratorio!: number;
@@ -62,7 +85,8 @@ export class SolicitudReserva {
   @JoinColumn({ name: 'id_tipo' })
   tipoReserva!: TipoReserva;
 
-  /** Obligatorio solo si tipoReserva.requiereEspacio = true. */
+  /** Obligatorio para cualquier tipo de reserva (formato EATUF) — nullable
+   * en BD solo por datos históricos previos a esa exigencia. */
   @Column({ name: 'id_espacio', nullable: true })
   idEspacio?: number | null;
 
@@ -70,20 +94,25 @@ export class SolicitudReserva {
   @JoinColumn({ name: 'id_espacio' })
   espacioAcademico?: EspacioAcademico | null;
 
-  /** Trazabilidad pura: la carrera que el solicitante declara. No filtra ni valida nada más. */
-  @Column({ name: 'id_facultad' })
-  idFacultad!: number;
+  /** Trazabilidad pura: la carrera que el solicitante declara. No filtra ni
+   * valida nada más. Null solo para "Evento especial" — ver comentario de
+   * idDocenteEncargado, mismo criterio. */
+  @Column({ name: 'id_facultad', nullable: true })
+  idFacultad!: number | null;
 
-  @ManyToOne(() => Facultad)
+  @ManyToOne(() => Facultad, { nullable: true })
   @JoinColumn({ name: 'id_facultad' })
-  facultad!: Facultad;
+  facultad?: Facultad | null;
 
-  @Column({ name: 'id_periodo' })
-  idPeriodo!: number;
+  /** Null solo para "Evento especial" — ver comentario de idDocenteEncargado,
+   * mismo criterio. Sin periodo no aplica el chequeo de "fecha dentro del
+   * periodo" ni el cálculo de semana académica (ver crearDirectaLote). */
+  @Column({ name: 'id_periodo', nullable: true })
+  idPeriodo!: number | null;
 
-  @ManyToOne(() => PeriodoAcademico)
+  @ManyToOne(() => PeriodoAcademico, { nullable: true })
   @JoinColumn({ name: 'id_periodo' })
-  periodoAcademico!: PeriodoAcademico;
+  periodoAcademico?: PeriodoAcademico | null;
 
   @Column({
     name: 'grupo_asignatura',
@@ -124,18 +153,9 @@ export class SolicitudReserva {
   @Column({ name: 'motivo_cancelacion', type: 'text', nullable: true })
   motivoCancelacion?: string | null;
 
-  /** El solicitante puede "limpiar" su vista de Mis Solicitudes ocultando
-   * las suyas ya resueltas (rechazada/cancelada) — no borra el registro,
-   * solo lo saca de findMias. Historial/Estadísticas/Bandeja no la miran. */
   @Column({ default: false })
   archivada!: boolean;
 
-  /** "Vaciar archivadas" — soft delete separado de `archivada`: saca la
-   * solicitud de Mis Solicitudes para siempre (activas Y archivadas), pero
-   * NO toca Historial/Estadísticas (esas vistas no filtran por esta
-   * columna, así que siguen viendo todo — el rastro de auditoría para
-   * admin/laboratorista nunca depende de lo que el solicitante decida
-   * limpiar de su propia bandeja). */
   @Column({ default: false })
   eliminada!: boolean;
 
@@ -147,6 +167,17 @@ export class SolicitudReserva {
 
   @Column({ name: 'materiales_estudiante', type: 'text', nullable: true })
   materialesEstudiante?: string | null;
+
+  @Column({ name: 'id_lote_especial', type: 'uuid', nullable: true })
+  idLoteEspecial?: string | null;
+
+  /** Solo lo llena crearDirectaLote (reserva especial): nombre de quien
+   * organiza/responde por el evento, texto libre — quien arma una reserva
+   * especial normalmente no es un docente asociado al laboratorio, así que
+   * no alcanza con idDocenteEncargado para saber a quién contactar. Null
+   * para cualquier otra reserva. */
+  @Column({ name: 'responsable', type: 'varchar', length: 200, nullable: true })
+  responsable?: string | null;
 
   @OneToMany(() => Firma, (firma) => firma.solicitud)
   firmas!: Firma[];

@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -22,6 +23,7 @@ import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorat
 import { SolicitudesService } from './solicitudes.service';
 import { CreateSolicitudDto } from './dto/create-solicitud.dto';
 import { CreateSolicitudDirectaDto } from './dto/create-solicitud-directa.dto';
+import { CreateSolicitudDirectaLoteDto } from './dto/create-solicitud-directa-lote.dto';
 import { RechazarSolicitudDto } from './dto/rechazar-solicitud.dto';
 import { FirmarSolicitudDto } from './dto/firmar-solicitud.dto';
 import { CancelarSolicitudDto } from './dto/cancelar-solicitud.dto';
@@ -93,6 +95,40 @@ export class SolicitudesController {
     return this.solicitudesService.crearDirecta(dto, usuario);
   }
 
+  @Post('directa-lote')
+  @Roles('admin', 'laboratorista')
+  @ApiOperation({
+    summary:
+      'Crear un evento especial de varios días (admin/laboratorista): una solicitud aprobada por cada fecha, todo o nada',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Solicitudes creadas y aprobadas (una por fecha)',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Datos inválidos (reglas de negocio)',
+  })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({
+    status: 403,
+    description: 'Rol insuficiente (solo admin o laboratorista)',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Alguna entidad referenciada no existe',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Sin disponibilidad en alguna de las fechas: no se crea nada',
+  })
+  crearDirectaLote(
+    @Body() dto: CreateSolicitudDirectaLoteDto,
+    @CurrentUser() usuario: AuthenticatedUser,
+  ) {
+    return this.solicitudesService.crearDirectaLote(dto, usuario);
+  }
+
   @Get('mias')
   @ApiQuery({
     name: 'archivadas',
@@ -108,6 +144,13 @@ export class SolicitudesController {
       'Si se envía (junto con o sin `limit`), la respuesta es { data, meta }. Si se omiten ambos, devuelve el arreglo completo (lo usa Inicio para sus contadores).',
   })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({
+    name: 'soloEspeciales',
+    required: false,
+    type: Boolean,
+    description:
+      'true: solo reservas especiales de varios días; false: solo reservas normales (las excluye); ausente: todo, sin filtrar (usado por los contadores de Inicio)',
+  })
   @ApiOperation({ summary: 'Listar mis solicitudes (con firmas embebidas)' })
   @ApiResponse({ status: 200, description: 'Listado de mis solicitudes' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
@@ -116,19 +159,32 @@ export class SolicitudesController {
     @Query('archivadas') archivadas?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('soloEspeciales') soloEspeciales?: string,
   ) {
     const esArchivadas = archivadas === 'true';
     const pagination =
       page || limit ? resolvePagination(page, limit) : undefined;
+    const filtroEspeciales =
+      soloEspeciales === undefined ? undefined : soloEspeciales === 'true';
     return pagination
-      ? this.solicitudesService.findMias(usuario, esArchivadas, pagination)
-      : this.solicitudesService.findMias(usuario, esArchivadas);
+      ? this.solicitudesService.findMias(
+          usuario,
+          esArchivadas,
+          pagination,
+          filtroEspeciales,
+        )
+      : this.solicitudesService.findMias(
+          usuario,
+          esArchivadas,
+          undefined,
+          filtroEspeciales,
+        );
   }
 
   @Get('pendientes-de-mi-firma')
   @ApiOperation({
     summary:
-      'Bandeja de firmas pendientes (docente: las suyas; laboratorista: todas)',
+      'Bandeja de firmas pendientes (docente: las suyas; laboratorista: las de los laboratorios que tiene asignados)',
   })
   @ApiResponse({
     status: 200,
@@ -160,6 +216,13 @@ export class SolicitudesController {
   })
   @ApiQuery({ name: 'fechaDesde', required: false, type: String })
   @ApiQuery({ name: 'fechaHasta', required: false, type: String })
+  @ApiQuery({
+    name: 'soloEventosEspeciales',
+    required: false,
+    type: Boolean,
+    description:
+      'true: solo solicitudes de una reserva especial de varios días',
+  })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({
     name: 'limit',
@@ -186,6 +249,7 @@ export class SolicitudesController {
     @Query('nombreSolicitante') nombreSolicitante?: string,
     @Query('fechaDesde') fechaDesde?: string,
     @Query('fechaHasta') fechaHasta?: string,
+    @Query('soloEventosEspeciales') soloEventosEspeciales?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -199,6 +263,7 @@ export class SolicitudesController {
         nombreSolicitante,
         fechaDesde,
         fechaHasta,
+        soloEventosEspeciales: soloEventosEspeciales === 'true',
       },
       resolvePagination(page, limit),
     );
@@ -284,6 +349,104 @@ export class SolicitudesController {
     @CurrentUser() usuario: AuthenticatedUser,
   ) {
     return this.solicitudesService.cancelar(id, usuario, cancelarSolicitudDto);
+  }
+
+  @Post('lote/:idLoteEspecial/cancelar')
+  @ApiOperation({
+    summary:
+      'Cancelar de un golpe todas las solicitudes vivas de un evento especial (solicitante o admin)',
+  })
+  @ApiResponse({ status: 200, description: 'Solicitudes canceladas' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({
+    status: 403,
+    description: 'Solo el solicitante o un admin pueden cancelar',
+  })
+  @ApiResponse({ status: 404, description: 'Evento especial no encontrado' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Ninguna solicitud del evento se puede cancelar en su estado actual',
+  })
+  cancelarLote(
+    @Param('idLoteEspecial', ParseUUIDPipe) idLoteEspecial: string,
+    @Body() cancelarSolicitudDto: CancelarSolicitudDto,
+    @CurrentUser() usuario: AuthenticatedUser,
+  ) {
+    return this.solicitudesService.cancelarLote(
+      idLoteEspecial,
+      usuario,
+      cancelarSolicitudDto,
+    );
+  }
+
+  @Patch('lote/:idLoteEspecial/archivar')
+  @ApiOperation({
+    summary:
+      'Archivar de un golpe las solicitudes resueltas de un evento especial (solo admin/laboratorista — desaparece de la lista para todos)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Solicitudes archivadas del evento',
+  })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Solo admin o laboratorista pueden gestionar reservas especiales',
+  })
+  @ApiResponse({ status: 404, description: 'Evento especial no encontrado' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Ninguna solicitud del evento se puede archivar en su estado actual',
+  })
+  archivarLote(
+    @Param('idLoteEspecial', ParseUUIDPipe) idLoteEspecial: string,
+    @CurrentUser() usuario: AuthenticatedUser,
+  ) {
+    return this.solicitudesService.archivarLote(idLoteEspecial, usuario);
+  }
+
+  @Patch('lote/:idLoteEspecial/desarchivar')
+  @ApiOperation({
+    summary:
+      'Restaurar de un golpe todas las solicitudes de un evento especial archivado (solo admin/laboratorista)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Solicitudes restauradas del evento',
+  })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Solo admin o laboratorista pueden gestionar reservas especiales',
+  })
+  @ApiResponse({ status: 404, description: 'Evento especial no encontrado' })
+  desarchivarLote(
+    @Param('idLoteEspecial', ParseUUIDPipe) idLoteEspecial: string,
+    @CurrentUser() usuario: AuthenticatedUser,
+  ) {
+    return this.solicitudesService.desarchivarLote(idLoteEspecial, usuario);
+  }
+
+  @Delete('lote/archivadas')
+  @ApiOperation({
+    summary:
+      'Borrar definitivamente TODAS las reservas especiales archivadas del sistema (solo admin/laboratorista — no se puede deshacer)',
+  })
+  @ApiResponse({ status: 200, description: '{ eliminadas: number }' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Solo admin o laboratorista pueden gestionar reservas especiales',
+  })
+  async vaciarArchivadasEspeciales(@CurrentUser() usuario: AuthenticatedUser) {
+    const eliminadas =
+      await this.solicitudesService.vaciarArchivadasEspeciales(usuario);
+    return { eliminadas };
   }
 
   @Patch(':id/archivar')

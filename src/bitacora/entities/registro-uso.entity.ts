@@ -61,9 +61,9 @@ export class RegistroUso {
   @Column({ name: 'num_asistentes', type: 'int', default: 0 })
   numAsistentes!: number;
 
-  @Column({ type: 'varchar', length: 60, nullable: true })
-  novedad?: string | null;
-
   @Column({ type: 'text', nullable: true })
   observaciones?: string | null;
+
+  @Column({ name: 'uso_laboratorio', type: 'varchar', length: 60, nullable: true })
+  usoLaboratorio?: string | null;
 }

@@ -56,6 +56,8 @@ describe('BitacoraService', () => {
     fecha: '2026-08-10',
     horaInicioReal: '08:00',
     horaFinReal: '10:00',
+    observaciones: 'Ninguno',
+    usoLaboratorio: 'Docencia',
   };
 
   const queryBuilderMock = {
@@ -208,29 +210,26 @@ describe('BitacoraService', () => {
   });
 
   describe('update', () => {
-    it('modifica novedad/observaciones', async () => {
+    it('modifica observaciones', async () => {
       const registroExistente: Partial<RegistroUso> = {
         idRegistro: 1,
         idLaboratorio: 1,
         horaInicioReal: '08:00',
         horaFinReal: '10:00',
         fecha: '2026-08-10',
-        novedad: null,
         observaciones: null,
         solicitud: null,
       };
       registroUsoRepository.findOne.mockResolvedValue(registroExistente);
 
       const actualizado = await service.update(1, {
-        novedad: 'Docente ausente',
-        observaciones: 'Sin novedad adicional',
+        observaciones: 'Docente ausente',
       });
 
       expect(actualizado).toMatchObject({
         idRegistro: 1,
         idLaboratorio: 1,
-        novedad: 'Docente ausente',
-        observaciones: 'Sin novedad adicional',
+        observaciones: 'Docente ausente',
       });
     });
 
@@ -312,9 +311,9 @@ describe('BitacoraService', () => {
     it('lanza NOT_FOUND si el registro no existe', async () => {
       registroUsoRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.update(999, { novedad: 'x' })).rejects.toMatchObject(
-        { status: HttpStatus.NOT_FOUND },
-      );
+      await expect(
+        service.update(999, { observaciones: 'Ninguno' }),
+      ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
     });
   });
 

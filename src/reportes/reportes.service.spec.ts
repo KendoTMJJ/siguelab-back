@@ -45,7 +45,7 @@ describe('ReportesService — export de asistencias', () => {
     horaInicioReal: '08:00',
     horaFinReal: '10:00',
     numAsistentes: 5,
-    novedad: null,
+    observaciones: null,
   };
 
   const registroSinSolicitudNiMapeo: Partial<RegistroUso> = {
@@ -58,7 +58,7 @@ describe('ReportesService — export de asistencias', () => {
     horaInicioReal: '14:00',
     horaFinReal: '16:00',
     numAsistentes: 3,
-    novedad: 'Docente ausente',
+    observaciones: 'Docente ausente',
   };
 
   const registroTesisConSolicitud: Partial<RegistroUso> = {
@@ -83,7 +83,7 @@ describe('ReportesService — export de asistencias', () => {
     horaInicioReal: '08:00',
     horaFinReal: '09:00',
     numAsistentes: 1,
-    novedad: null,
+    observaciones: null,
   };
 
   beforeEach(async () => {

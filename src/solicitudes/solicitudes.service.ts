@@ -1,5 +1,14 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { DataSource, In, Repository, SelectQueryBuilder } from 'typeorm';
+import { randomUUID } from 'crypto';
+import {
+  Between,
+  DataSource,
+  In,
+  IsNull,
+  Not,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorator';
 import {
   PaginatedResult,
@@ -15,6 +24,7 @@ import {
 import { EspacioAcademico } from 'src/catalogos/entities/espacio-academico.entity';
 import { EspacioLaboratorio } from 'src/laboratorios/entities/espacio-laboratorio.entity';
 import { DocenteLaboratorio } from 'src/laboratorios/entities/docente-laboratorio.entity';
+import { LaboratoristaLaboratorio } from 'src/laboratorios/entities/laboratorista-laboratorio.entity';
 import { TipoReserva } from 'src/catalogos/entities/tipo-reserva.entity';
 import { PeriodoAcademico } from 'src/catalogos/entities/periodo-academico.entity';
 import { Facultad } from 'src/catalogos/entities/facultad.entity';
@@ -38,9 +48,11 @@ import {
 } from './entities/solicitud-evento.entity';
 import { CreateSolicitudDto } from './dto/create-solicitud.dto';
 import { CreateSolicitudDirectaDto } from './dto/create-solicitud-directa.dto';
+import { CreateSolicitudDirectaLoteDto } from './dto/create-solicitud-directa-lote.dto';
 import { RechazarSolicitudDto } from './dto/rechazar-solicitud.dto';
 import { FirmarSolicitudDto } from './dto/firmar-solicitud.dto';
 import { CancelarSolicitudDto } from './dto/cancelar-solicitud.dto';
+import { CONDICION_CANCELADA_TRAS_APROBACION } from './utils/cancelada-tras-aprobacion.util';
 
 const DIAS_SEMANA_POR_INDICE: DiaSemana[] = [
   DiaSemana.DOMINGO,
@@ -60,6 +72,10 @@ export interface FiltrosSolicitudes {
   nombreSolicitante?: string;
   fechaDesde?: string;
   fechaHasta?: string;
+  /** true: solo solicitudes que son parte de una reserva especial de varios
+   * días (idLoteEspecial no nulo) — lo usa la pantalla de reservas
+   * especiales para no traer historial normal mezclado. */
+  soloEventosEspeciales?: boolean;
 }
 
 export interface BloqueDisponibilidad {
@@ -71,8 +87,17 @@ export interface BloqueDisponibilidad {
   nombrePractica?: string;
   cuposOcupados?: number;
   capacidad?: number;
-  /** Solo origen 'horario_academico': materia + grupo/código de esa clase. */
   nombreEspacio?: string;
+  /** true si el bloque viene de una reserva especial de varios días (ver
+   * idLoteEspecial / crearDirectaLote) — el frontend lo pinta distinto a un
+   * bloqueo exclusivo normal (ej. Docencia). */
+  esEventoEspecial?: boolean;
+  /** true si el bloque es una solicitud CANCELADA que llegó a estar
+   * aprobada antes de cancelarse — sigue ocupando el horario hasta que pase
+   * la fecha (ver CONDICION_CANCELADA_TRAS_APROBACION), pero el frontend
+   * debe pintarlo distinto a una reserva activa para no confundir al
+   * usuario (el laboratorio está bloqueado, pero nadie va a usarlo). */
+  estaCancelada?: boolean;
 }
 
 @Injectable()
@@ -83,6 +108,7 @@ export class SolicitudesService {
   private readonly espacioAcademicoRepository: Repository<EspacioAcademico>;
   private readonly espacioLaboratorioRepository: Repository<EspacioLaboratorio>;
   private readonly docenteLaboratorioRepository: Repository<DocenteLaboratorio>;
+  private readonly laboratoristaLaboratorioRepository: Repository<LaboratoristaLaboratorio>;
   private readonly tipoReservaRepository: Repository<TipoReserva>;
   private readonly periodoAcademicoRepository: Repository<PeriodoAcademico>;
   private readonly facultadRepository: Repository<Facultad>;
@@ -104,6 +130,9 @@ export class SolicitudesService {
       this.dataSource.getRepository(EspacioLaboratorio);
     this.docenteLaboratorioRepository =
       this.dataSource.getRepository(DocenteLaboratorio);
+    this.laboratoristaLaboratorioRepository = this.dataSource.getRepository(
+      LaboratoristaLaboratorio,
+    );
     this.tipoReservaRepository = this.dataSource.getRepository(TipoReserva);
     this.periodoAcademicoRepository =
       this.dataSource.getRepository(PeriodoAcademico);
@@ -217,9 +246,21 @@ export class SolicitudesService {
       // REALIZADA cuenta igual que APROBADA acá: la franja ya se usó, así
       // que sigue ocupada para efectos de cruce — solo cambió porque el
       // laboratorista ya registró bitácora, no porque el horario se liberó.
-      .andWhere('solicitud.estado IN (:...estados)', {
-        estados: [EstadoSolicitud.APROBADA, EstadoSolicitud.REALIZADA],
-      });
+      // Una CANCELADA que llegó a estar aprobada (ver
+      // CONDICION_CANCELADA_TRAS_APROBACION) también sigue ocupando: una
+      // reserva ya aprobada nunca libera el laboratorio antes de su fecha,
+      // ni siquiera si el solicitante la cancela después — a diferencia de
+      // rechazar o cancelar mientras todavía está pendiente de firmas
+      // (nunca se aprobó nada), que sí libera de inmediato y por eso ni
+      // entra acá.
+      .andWhere(
+        `(solicitud.estado IN (:...estados) OR (${CONDICION_CANCELADA_TRAS_APROBACION}))`,
+        {
+          estados: [EstadoSolicitud.APROBADA, EstadoSolicitud.REALIZADA],
+          cancelada: EstadoSolicitud.CANCELADA,
+          firmaAprobada: ResultadoFirma.APROBADA,
+        },
+      );
 
     if (idSolicitudExcluir) {
       query.andWhere('solicitud.id_solicitud != :idExcluir', {
@@ -290,6 +331,17 @@ export class SolicitudesService {
       }
     }
 
+    // Una reserva exclusiva no comparte aforo con nadie (ya se garantizó
+    // arriba que no hay otra solicitud cruzando) — el concepto de "cupos"
+    // no aplica, así que no tiene sentido medirla contra capacidadLaboratorio.
+    // Sin este corte, un laboratorio en modo "como servicio" (capacidad
+    // nula, ver Laboratorio.capacidad) rechazaba SIEMPRE un tipo exclusivo
+    // como "Evento especial" con "Sin cupo disponible (0/0)", aunque el
+    // horario estuviera completamente libre.
+    if (params.esExclusiva) {
+      return { disponible: true };
+    }
+
     // Antes esto solo corría si ya había otra solicitud aprobada cruzando el
     // horario (aprobadasQueCruzan.length > 0) — si esta era la PRIMERA
     // reserva de la franja, el chequeo de aforo se saltaba entero y
@@ -321,9 +373,20 @@ export class SolicitudesService {
     return !!usuario && usuario.rol.nombre === nombreRol;
   }
 
-  private async todosLosLaboratoristas(): Promise<
-    { idUsuario: string; correo: string }[]
-  > {
+  /** Solo los laboratoristas ASOCIADOS a ese laboratorio (ver
+   * LaboratoristaLaboratorio) — antes notificaba a todos los laboratoristas
+   * activos del sistema, sin importar el laboratorio; ahora que la
+   * asociación es un gate real (igual que docente), las notificaciones
+   * siguen el mismo criterio: solo le llega a quien realmente puede actuar
+   * sobre esa solicitud. */
+  private async todosLosLaboratoristas(
+    idLaboratorio: number,
+  ): Promise<{ idUsuario: string; correo: string }[]> {
+    const asociaciones = await this.laboratoristaLaboratorioRepository.find({
+      where: { idLaboratorio },
+    });
+    if (asociaciones.length === 0) return [];
+
     const rolLaboratorista = await this.rolRepository.findOne({
       where: { nombre: 'laboratorista' },
     });
@@ -331,11 +394,58 @@ export class SolicitudesService {
 
     const usuarios = await this.usuarioRepository.find({
       where: {
+        idUsuario: In(asociaciones.map((a) => a.idUsuario)),
         rol: { idRol: rolLaboratorista.idRol },
         estado: EstadoUsuario.ACTIVO,
       },
     });
     return usuarios.map((u) => ({ idUsuario: u.idUsuario, correo: u.correo }));
+  }
+
+  /** Notifica solo al laboratorista encargado de la solicitud (ver
+   * idLaboratoristaEncargado) — reemplaza el aviso a "todos los
+   * laboratoristas del laboratorio" en los dos puntos donde una solicitud
+   * normal (no evento especial) le llega a alguien para firmar. Fallback a
+   * todosLosLaboratoristas() SOLO para las filas legacy sin encargado (ver
+   * el comentario de idLaboratoristaEncargado en la entidad). */
+  private async notificarLaboratoristaEncargado(
+    tipo: TipoEventoNotificacion,
+    solicitud: SolicitudReserva,
+  ): Promise<void> {
+    if (!solicitud.idLaboratoristaEncargado) {
+      await this.notificacionesService.notificar(
+        tipo,
+        solicitud,
+        await this.todosLosLaboratoristas(solicitud.idLaboratorio),
+      );
+      return;
+    }
+    const laboratorista = await this.usuarioRepository.findOne({
+      where: { idUsuario: solicitud.idLaboratoristaEncargado },
+    });
+    if (laboratorista) {
+      await this.notificacionesService.notificar(tipo, solicitud, [
+        { idUsuario: laboratorista.idUsuario, correo: laboratorista.correo },
+      ]);
+    }
+  }
+
+  /** Gate de firmar()/rechazar() en el paso pendiente_laboratorista: si la
+   * solicitud tiene un laboratorista encargado (el caso normal desde que
+   * existe este campo), solo ÉL puede actuar — igual que el docente
+   * encargado. Fallback a "cualquier laboratorista asociado al laboratorio"
+   * solo para las filas legacy sin encargado (idLaboratoristaEncargado null,
+   * ver comentario en la entidad). */
+  private async puedeActuarComoLaboratorista(
+    solicitud: SolicitudReserva,
+    idUsuario: string,
+  ): Promise<boolean> {
+    if (solicitud.idLaboratoristaEncargado) {
+      return idUsuario === solicitud.idLaboratoristaEncargado;
+    }
+    return this.laboratoristaLaboratorioRepository.exists({
+      where: { idLaboratorio: solicitud.idLaboratorio, idUsuario },
+    });
   }
 
   // ───────────────────────── creación ─────────────────────────
@@ -361,37 +471,29 @@ export class SolicitudesService {
       );
     }
 
-    // Solo los tipos con requiereEspacio = true (hoy, únicamente "Docencia")
-    // necesitan un espacio académico asociado al laboratorio — exigirlo para
-    // TODOS los tipos bloqueaba cualquier reserva (incluso "Práctica libre",
-    // "CAU", etc.) en un laboratorio que no tuviera ningún espacio académico
-    // asociado, sin que eso tuviera nada que ver con el tipo de reserva pedido.
-    if (tipoReserva.requiereEspacio) {
-      if (!dto.idEspacio) {
-        throw new HttpException(
-          'Este tipo de reserva requiere indicar un espacio académico',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      const espacio = await this.espacioAcademicoRepository.findOne({
-        where: { idEspacio: dto.idEspacio },
-      });
-      if (!espacio) {
-        throw new HttpException(
-          'Espacio académico no encontrado',
-          HttpStatus.NOT_FOUND,
-        );
-      }
+    // idEspacio/grupoAsignatura/numGruposTrabajo son obligatorios para
+    // cualquier tipo de reserva (lo exige el formato EATUF de la
+    // institución) — ya no dependen de tipoReserva.requiereEspacio/
+    // esExclusiva, esos flags solo afectan disponibilidad y quién puede
+    // crear el tipo, no qué datos hacen falta.
+    const espacio = await this.espacioAcademicoRepository.findOne({
+      where: { idEspacio: dto.idEspacio },
+    });
+    if (!espacio) {
+      throw new HttpException(
+        'Espacio académico no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
 
-      const espacioAsociado = await this.espacioLaboratorioRepository.exists({
-        where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
-      });
-      if (!espacioAsociado) {
-        throw new HttpException(
-          'El laboratorio elegido no está asociado a ese espacio académico',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+    const espacioAsociado = await this.espacioLaboratorioRepository.exists({
+      where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
+    });
+    if (!espacioAsociado) {
+      throw new HttpException(
+        'El laboratorio elegido no está asociado a ese espacio académico',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const docenteAsociado = await this.docenteLaboratorioRepository.exists({
@@ -403,6 +505,20 @@ export class SolicitudesService {
     if (!docenteAsociado) {
       throw new HttpException(
         'El docente encargado no está asociado a este laboratorio',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const laboratoristaAsociado =
+      await this.laboratoristaLaboratorioRepository.exists({
+        where: {
+          idUsuario: dto.idLaboratoristaEncargado,
+          idLaboratorio: dto.idLaboratorio,
+        },
+      });
+    if (!laboratoristaAsociado) {
+      throw new HttpException(
+        'El laboratorista encargado no está a cargo de este laboratorio',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -425,15 +541,6 @@ export class SolicitudesService {
     if (laboratorio.modoReserva !== ModoReservaLaboratorio.ESTANDAR) {
       throw new HttpException(
         'Este laboratorio no admite solicitudes de reserva (no está en modo estándar)',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    const esDocenteExclusivo =
-      solicitante.rol === 'docente' && tipoReserva.esExclusiva;
-    if ((dto.grupoAsignatura || dto.numGruposTrabajo) && !esDocenteExclusivo) {
-      throw new HttpException(
-        'grupoAsignatura/numGruposTrabajo solo aplican para un docente creando un tipo exclusivo',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -519,6 +626,7 @@ export class SolicitudesService {
         const solicitud = solicitudRepo.create({
           idSolicitante: solicitante.id,
           idDocenteEncargado: dto.idDocenteEncargado,
+          idLaboratoristaEncargado: dto.idLaboratoristaEncargado,
           idLaboratorio: dto.idLaboratorio,
           idTipo: dto.idTipo,
           idEspacio: dto.idEspacio ?? null,
@@ -545,6 +653,7 @@ export class SolicitudesService {
               idSolicitud: guardada.idSolicitud,
               orden: 1,
               rolFirmante: RolFirmante.LABORATORISTA,
+              idFirmante: dto.idLaboratoristaEncargado,
               resultado: ResultadoFirma.PENDIENTE,
             }),
           );
@@ -563,6 +672,7 @@ export class SolicitudesService {
               idSolicitud: guardada.idSolicitud,
               orden: 2,
               rolFirmante: RolFirmante.LABORATORISTA,
+              idFirmante: dto.idLaboratoristaEncargado,
               resultado: ResultadoFirma.PENDIENTE,
             }),
           );
@@ -595,10 +705,9 @@ export class SolicitudesService {
         );
       }
     } else {
-      await this.notificacionesService.notificar(
+      await this.notificarLaboratoristaEncargado(
         TipoEventoNotificacion.PENDIENTE_FIRMA,
         solicitudCreada,
-        await this.todosLosLaboratoristas(),
       );
     }
 
@@ -623,6 +732,19 @@ export class SolicitudesService {
     dto: CreateSolicitudDirectaDto,
     creador: AuthenticatedUser,
   ): Promise<SolicitudReserva> {
+    if (creador.rol === 'laboratorista') {
+      const laboratoristaAsociado =
+        await this.laboratoristaLaboratorioRepository.exists({
+          where: { idLaboratorio: dto.idLaboratorio, idUsuario: creador.id },
+        });
+      if (!laboratoristaAsociado) {
+        throw new HttpException(
+          'No estás a cargo de este laboratorio',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+    }
+
     const tipoReserva = await this.tipoReservaRepository.findOne({
       where: { idTipo: dto.idTipo },
     });
@@ -633,34 +755,26 @@ export class SolicitudesService {
       );
     }
 
-    // Ver comentario equivalente en create(): solo los tipos con
-    // requiereEspacio = true necesitan un espacio académico asociado.
-    if (tipoReserva.requiereEspacio) {
-      if (!dto.idEspacio) {
-        throw new HttpException(
-          'Este tipo de reserva requiere indicar un espacio académico',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      const espacio = await this.espacioAcademicoRepository.findOne({
-        where: { idEspacio: dto.idEspacio },
-      });
-      if (!espacio) {
-        throw new HttpException(
-          'Espacio académico no encontrado',
-          HttpStatus.NOT_FOUND,
-        );
-      }
+    // Ver comentario equivalente en create(): idEspacio/grupoAsignatura/
+    // numGruposTrabajo son obligatorios para cualquier tipo (formato EATUF).
+    const espacio = await this.espacioAcademicoRepository.findOne({
+      where: { idEspacio: dto.idEspacio },
+    });
+    if (!espacio) {
+      throw new HttpException(
+        'Espacio académico no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
 
-      const espacioAsociado = await this.espacioLaboratorioRepository.exists({
-        where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
-      });
-      if (!espacioAsociado) {
-        throw new HttpException(
-          'El laboratorio elegido no está asociado a ese espacio académico',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+    const espacioAsociado = await this.espacioLaboratorioRepository.exists({
+      where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
+    });
+    if (!espacioAsociado) {
+      throw new HttpException(
+        'El laboratorio elegido no está asociado a ese espacio académico',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const docenteAsociado = await this.docenteLaboratorioRepository.exists({
@@ -694,16 +808,6 @@ export class SolicitudesService {
     if (laboratorio.modoReserva !== ModoReservaLaboratorio.ESTANDAR) {
       throw new HttpException(
         'Este laboratorio no admite solicitudes de reserva (no está en modo estándar)',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    if (
-      (dto.grupoAsignatura || dto.numGruposTrabajo) &&
-      !tipoReserva.esExclusiva
-    ) {
-      throw new HttpException(
-        'grupoAsignatura/numGruposTrabajo solo aplican para un tipo exclusivo',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -834,7 +938,7 @@ export class SolicitudesService {
       ...(docente
         ? [{ idUsuario: docente.idUsuario, correo: docente.correo }]
         : []),
-      ...(await this.todosLosLaboratoristas()),
+      ...(await this.todosLosLaboratoristas(dto.idLaboratorio)),
     ];
     if (destinatarios.length > 0) {
       await this.notificacionesService.notificar(
@@ -865,6 +969,327 @@ export class SolicitudesService {
     );
 
     return this.findOne(solicitudCreada.idSolicitud, creador);
+  }
+
+  /**
+   * Evento especial de varios días (admin/laboratorista): MISMOS campos que
+   * create()/crearDirecta() (tipo, horario, aforo, docente encargado,
+   * facultad, periodo...) — la única diferencia real es que en vez de una
+   * sola `fechaPractica` se manda un arreglo `fechas` y el mismo horario se
+   * valida y aplica a todas. Genera UNA SolicitudReserva independiente por
+   * fecha, cada una sigue el mismo flujo/estado/firmas/eventos que cualquier
+   * otra reserva directa (aprobada de inmediato, sin idLaboratoristaEncargado
+   * — no hay paso pendiente que asignarle a nadie). Lo único que las
+   * distingue de una reserva suelta es que comparten `idLoteEspecial`, solo
+   * para poder listarlas/cancelarlas juntas en la UI.
+   *
+   * Todo o nada: se valida disponibilidad de TODAS las fechas antes de crear
+   * nada — si una sola falla, no se crea ninguna del lote. Preferible a
+   * crear parcialmente porque con un evento de varios días es más fácil
+   * comunicar "el 15 ya está ocupado, ajusta las fechas" que dejar al
+   * laboratorista con 4 de 5 días creados sin darse cuenta.
+   */
+  async crearDirectaLote(
+    dto: CreateSolicitudDirectaLoteDto,
+    creador: AuthenticatedUser,
+  ): Promise<SolicitudReserva[]> {
+    if (creador.rol === 'laboratorista') {
+      const laboratoristaAsociado =
+        await this.laboratoristaLaboratorioRepository.exists({
+          where: { idLaboratorio: dto.idLaboratorio, idUsuario: creador.id },
+        });
+      if (!laboratoristaAsociado) {
+        throw new HttpException(
+          'No estás a cargo de este laboratorio',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+    }
+
+    const tipoReserva = await this.tipoReservaRepository.findOne({
+      where: { idTipo: dto.idTipo },
+    });
+    if (!tipoReserva) {
+      throw new HttpException(
+        'Tipo de reserva no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    // idEspacio/grupoAsignatura/numGruposTrabajo obligatorios para cualquier
+    // tipo — ver comentario equivalente en create().
+    const espacio = await this.espacioAcademicoRepository.findOne({
+      where: { idEspacio: dto.idEspacio },
+    });
+    if (!espacio) {
+      throw new HttpException(
+        'Espacio académico no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const espacioAsociado = await this.espacioLaboratorioRepository.exists({
+      where: { idEspacio: dto.idEspacio, idLaboratorio: dto.idLaboratorio },
+    });
+    if (!espacioAsociado) {
+      throw new HttpException(
+        'El laboratorio elegido no está asociado a ese espacio académico',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const docenteAsociado = await this.docenteLaboratorioRepository.exists({
+      where: {
+        idUsuario: dto.idDocenteEncargado,
+        idLaboratorio: dto.idLaboratorio,
+      },
+    });
+    if (!docenteAsociado) {
+      throw new HttpException(
+        'El docente encargado no está asociado a este laboratorio',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const laboratorio = await this.laboratorioRepository.findOne({
+      where: { idLaboratorio: dto.idLaboratorio },
+    });
+    if (!laboratorio) {
+      throw new HttpException(
+        'Laboratorio no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (laboratorio.estado === EstadoLaboratorio.INACTIVO) {
+      throw new HttpException(
+        'El laboratorio está inactivo',
+        HttpStatus.CONFLICT,
+      );
+    }
+    // A diferencia de crearDirecta (estándar únicamente), un evento especial
+    // aplica a cualquier modo de laboratorio — ver discusión sobre
+    // EventoLaboratorio: ese módulo solo cubría 'laboratorio_como_servicio',
+    // esta ruta cubre ambos.
+    if (
+      laboratorio.modoReserva !== ModoReservaLaboratorio.ESTANDAR &&
+      laboratorio.modoReserva !==
+        ModoReservaLaboratorio.LABORATORIO_COMO_SERVICIO
+    ) {
+      throw new HttpException(
+        'Este laboratorio no admite solicitudes de reserva',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const periodo = await this.periodoAcademicoRepository.findOne({
+      where: { idPeriodo: dto.idPeriodo },
+    });
+    if (!periodo) {
+      throw new HttpException(
+        'Periodo académico no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    if (dto.horaFin <= dto.horaInicio) {
+      throw new HttpException(
+        'La hora de fin debe ser posterior a la hora de inicio',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const facultad = await this.facultadRepository.findOne({
+      where: { idFacultad: dto.idFacultad },
+    });
+    if (!facultad) {
+      throw new HttpException('Facultad no encontrada', HttpStatus.NOT_FOUND);
+    }
+
+    // Validación por-fecha (periodo, pasado, disponibilidad, con el MISMO
+    // horario para todas) — todas antes de crear nada, para poder rechazar
+    // el lote completo señalando la fecha exacta que falló.
+    const hoy = hoyBogota();
+    for (const fecha of dto.fechas) {
+      if (fecha < periodo.fechaInicio || fecha > periodo.fechaFin) {
+        throw new HttpException(
+          `La fecha ${fecha} está fuera del periodo académico`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (new Date(`${fecha}T00:00:00Z`) < hoy) {
+        throw new HttpException(
+          `La fecha ${fecha} no puede ser en el pasado`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const disponibilidad = await this.verificarDisponibilidad({
+        idLaboratorio: dto.idLaboratorio,
+        capacidadLaboratorio: laboratorio.capacidad ?? 0,
+        fechaPractica: fecha,
+        horaInicio: dto.horaInicio,
+        horaFin: dto.horaFin,
+        esExclusiva: tipoReserva.esExclusiva,
+        numPersonas: dto.numPersonas,
+      });
+      if (!disponibilidad.disponible) {
+        throw new HttpException(
+          `Sin disponibilidad el ${fecha}: ${disponibilidad.motivo}`,
+          HttpStatus.CONFLICT,
+        );
+      }
+    }
+
+    const idLoteEspecial = randomUUID();
+    const ahora = new Date();
+
+    const solicitudesCreadas = await this.dataSource.transaction(
+      async (manager) => {
+        const solicitudRepo = manager.getRepository(SolicitudReserva);
+        const firmaRepo = manager.getRepository(Firma);
+        const creadas: SolicitudReserva[] = [];
+
+        for (const fecha of dto.fechas) {
+          const solicitud = solicitudRepo.create({
+            idSolicitante: creador.id,
+            idDocenteEncargado: dto.idDocenteEncargado,
+            responsable: dto.responsable,
+            idLaboratorio: dto.idLaboratorio,
+            idTipo: dto.idTipo,
+            idEspacio: dto.idEspacio ?? null,
+            idFacultad: dto.idFacultad,
+            idPeriodo: dto.idPeriodo,
+            grupoAsignatura: dto.grupoAsignatura ?? null,
+            numGruposTrabajo: dto.numGruposTrabajo ?? null,
+            fechaPractica: fecha,
+            horaInicio: dto.horaInicio,
+            horaFin: dto.horaFin,
+            nombrePractica: dto.nombrePractica,
+            numPersonas: dto.numPersonas,
+            semana: null,
+            reactivosSustancias: dto.reactivosSustancias ?? null,
+            equiposInsumos: dto.equiposInsumos ?? null,
+            materialesEstudiante: dto.materialesEstudiante ?? null,
+            estado: EstadoSolicitud.APROBADA,
+            idLoteEspecial,
+          });
+          const guardada = await solicitudRepo.save(solicitud);
+
+          await firmaRepo.save(
+            firmaRepo.create({
+              idSolicitud: guardada.idSolicitud,
+              orden: 1,
+              rolFirmante: RolFirmante.DOCENTE,
+              idFirmante: creador.id,
+              resultado: ResultadoFirma.APROBADA,
+              fechaHora: ahora,
+            }),
+          );
+          await firmaRepo.save(
+            firmaRepo.create({
+              idSolicitud: guardada.idSolicitud,
+              orden: 2,
+              rolFirmante: RolFirmante.LABORATORISTA,
+              idFirmante: creador.id,
+              resultado: ResultadoFirma.APROBADA,
+              fechaHora: ahora,
+            }),
+          );
+
+          creadas.push(guardada);
+        }
+
+        return creadas;
+      },
+    );
+
+    const docente = await this.usuarioRepository.findOne({
+      where: { idUsuario: dto.idDocenteEncargado },
+    });
+    const destinatarios = [
+      ...(docente
+        ? [{ idUsuario: docente.idUsuario, correo: docente.correo }]
+        : []),
+      ...(await this.todosLosLaboratoristas(dto.idLaboratorio)),
+    ];
+
+    const detalleLote = `Reserva directa creada por ${creador.rol === 'admin' ? 'un administrador' : 'un laboratorista'} como parte de un evento especial de ${dto.fechas.length} días (sin firmas ni antelación mínima)`;
+
+    for (const solicitud of solicitudesCreadas) {
+      if (destinatarios.length > 0) {
+        await this.notificacionesService.notificar(
+          TipoEventoNotificacion.SOLICITUD_APROBADA,
+          solicitud,
+          destinatarios,
+        );
+      }
+      await this.registrarEvento(
+        solicitud.idSolicitud,
+        TipoEventoSolicitud.CREADA,
+        creador.id,
+        detalleLote,
+      );
+      await this.registrarEvento(
+        solicitud.idSolicitud,
+        TipoEventoSolicitud.FIRMA_DOCENTE_APROBADA,
+        creador.id,
+        detalleLote,
+      );
+      await this.registrarEvento(
+        solicitud.idSolicitud,
+        TipoEventoSolicitud.FIRMA_LABORATORISTA_APROBADA,
+        creador.id,
+        detalleLote,
+      );
+    }
+
+    return Promise.all(
+      solicitudesCreadas.map((s) => this.findOne(s.idSolicitud, creador)),
+    );
+  }
+
+  /**
+   * Cancela de un golpe todas las solicitudes vivas de un evento especial
+   * (mismo `idLoteEspecial`) — por dentro sigue siendo N cancelaciones
+   * individuales (cada una genera su propio evento CANCELADA y su propia
+   * notificación), solo evita que el laboratorista tenga que repetir la
+   * acción día por día. Mismo criterio de permisos que cancelar(): solo el
+   * solicitante (quien creó el lote) o un admin.
+   */
+  async cancelarLote(
+    idLoteEspecial: string,
+    usuario: AuthenticatedUser,
+    dto: CancelarSolicitudDto,
+  ): Promise<SolicitudReserva[]> {
+    const solicitudes = await this.solicitudRepository.find({
+      where: { idLoteEspecial },
+    });
+    if (solicitudes.length === 0) {
+      throw new HttpException(
+        'Evento especial no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const estadosCancelables: EstadoSolicitud[] = [
+      EstadoSolicitud.PENDIENTE_DOCENTE,
+      EstadoSolicitud.PENDIENTE_LABORATORISTA,
+      EstadoSolicitud.APROBADA,
+    ];
+    const canceladas: SolicitudReserva[] = [];
+    for (const solicitud of solicitudes) {
+      if (!estadosCancelables.includes(solicitud.estado)) {
+        continue;
+      }
+      canceladas.push(await this.cancelar(solicitud.idSolicitud, usuario, dto));
+    }
+
+    if (canceladas.length === 0) {
+      throw new HttpException(
+        'Ninguna de las solicitudes de este evento se puede cancelar en su estado actual',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    return canceladas;
   }
 
   // ───────────────────────── verbos de negocio ─────────────────────────
@@ -938,10 +1363,9 @@ export class SolicitudesService {
           },
         ],
       );
-      await this.notificacionesService.notificar(
+      await this.notificarLaboratoristaEncargado(
         TipoEventoNotificacion.PENDIENTE_FIRMA,
         actualizada,
-        await this.todosLosLaboratoristas(),
       );
       await this.registrarEvento(
         idSolicitud,
@@ -956,6 +1380,14 @@ export class SolicitudesService {
       if (usuario.rol !== 'laboratorista') {
         throw new HttpException(
           'Solo un laboratorista puede resolver esta firma',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      if (!(await this.puedeActuarComoLaboratorista(solicitud, usuario.id))) {
+        throw new HttpException(
+          solicitud.idLaboratoristaEncargado
+            ? 'Solo el laboratorista encargado puede firmar esta solicitud'
+            : 'No estás a cargo de este laboratorio',
           HttpStatus.FORBIDDEN,
         );
       }
@@ -1121,6 +1553,14 @@ export class SolicitudesService {
           HttpStatus.FORBIDDEN,
         );
       }
+      if (!(await this.puedeActuarComoLaboratorista(solicitud, usuario.id))) {
+        throw new HttpException(
+          solicitud.idLaboratoristaEncargado
+            ? 'Solo el laboratorista encargado puede rechazar esta solicitud'
+            : 'No estás a cargo de este laboratorio',
+          HttpStatus.FORBIDDEN,
+        );
+      }
       ordenAResolver = solicitud.firmas.find(
         (f) => f.rolFirmante === RolFirmante.LABORATORISTA,
       )!.orden;
@@ -1231,6 +1671,26 @@ export class SolicitudesService {
         },
       ],
     );
+
+    // Solo si YA estaba aprobada (no si se cancela mientras seguía
+    // pendiente de firmas, donde nunca se aprobó nada y no hay nada que
+    // avisarle al docente): el laboratorio queda bloqueado hasta la fecha
+    // original (ver disponibilidad/solicitudesAprobadasQueCruzan más
+    // arriba), así que el docente merece saber que el estudiante canceló,
+    // aunque no tenga ninguna acción pendiente por eso.
+    if (solicitud.estado === EstadoSolicitud.APROBADA && solicitud.idDocenteEncargado) {
+      const docenteUsuario = await this.usuarioRepository.findOne({
+        where: { idUsuario: solicitud.idDocenteEncargado },
+      });
+      if (docenteUsuario) {
+        await this.notificacionesService.notificar(
+          TipoEventoNotificacion.SOLICITUD_CANCELADA_DOCENTE,
+          actualizada,
+          [{ idUsuario: docenteUsuario.idUsuario, correo: docenteUsuario.correo }],
+        );
+      }
+    }
+
     await this.registrarEvento(
       idSolicitud,
       TipoEventoSolicitud.CANCELADA,
@@ -1280,21 +1740,32 @@ export class SolicitudesService {
   findMias(
     usuario: AuthenticatedUser,
     archivadas?: boolean,
+    pagination?: undefined,
+    soloEspeciales?: boolean,
   ): Promise<SolicitudReserva[]>;
   findMias(
     usuario: AuthenticatedUser,
     archivadas: boolean,
     pagination: PaginationParams,
+    soloEspeciales?: boolean,
   ): Promise<PaginatedResult<SolicitudReserva>>;
   async findMias(
     usuario: AuthenticatedUser,
     archivadas = false,
     pagination?: PaginationParams,
+    soloEspeciales?: boolean,
   ): Promise<SolicitudReserva[] | PaginatedResult<SolicitudReserva>> {
     const where = {
       idSolicitante: usuario.id,
       archivada: archivadas,
       eliminada: false,
+      // undefined: sin filtro (ej. los contadores de Inicio, que necesitan
+      // el total real de todo lo mío). true/false: usado por "Mis
+      // solicitudes" para separar la pestaña "Reservas especiales" de
+      // "Reservas" — sin esto, un evento especial de varios días aparecía
+      // ahí como N tarjetas sueltas, una por fecha, en vez de agruparse.
+      ...(soloEspeciales === true && { idLoteEspecial: Not(IsNull()) }),
+      ...(soloEspeciales === false && { idLoteEspecial: IsNull() }),
     };
     const relations = { firmas: true, eventos: true };
     const order = {
@@ -1391,6 +1862,107 @@ export class SolicitudesService {
     return resultado.affected ?? 0;
   }
 
+  /** Solo admin/laboratorista pueden tocar archivada/eliminada de un evento
+   * especial que NO crearon ellos — a diferencia de archivar()/desarchivar()/
+   * vaciarArchivadas() normales (siempre "solo el propio solicitante", una
+   * bandeja personal), "Reservas especiales" es una lista COMPARTIDA de
+   * gestión: cualquier admin/laboratorista debe poder archivar/limpiar un
+   * evento creado por otro laboratorista, y al archivarse desaparece de la
+   * lista para todos los que la ven, no solo para quien lo creó. */
+  private exigirRolGestorEventos(usuario: AuthenticatedUser): void {
+    if (usuario.rol !== 'admin' && usuario.rol !== 'laboratorista') {
+      throw new HttpException(
+        'Solo admin o laboratorista pueden gestionar reservas especiales',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
+  /** Archiva las solicitudes del evento que ya estén resueltas
+   * (rechazada/cancelada/realizada) — igual que archivar(), pero para
+   * TODAS las fechas del evento de un golpe. Las que todavía no llegaron a
+   * un estado archivable (ej. una fecha futura aún aprobada) se saltan sin
+   * error, igual que cancelarLote. */
+  async archivarLote(
+    idLoteEspecial: string,
+    usuario: AuthenticatedUser,
+  ): Promise<SolicitudReserva[]> {
+    this.exigirRolGestorEventos(usuario);
+
+    const solicitudes = await this.solicitudRepository.find({
+      where: { idLoteEspecial },
+    });
+    if (solicitudes.length === 0) {
+      throw new HttpException(
+        'Evento especial no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const ESTADOS_ARCHIVABLES = [
+      EstadoSolicitud.RECHAZADA,
+      EstadoSolicitud.CANCELADA,
+      EstadoSolicitud.REALIZADA,
+    ];
+    const idsArchivables = solicitudes
+      .filter((s) => !s.archivada && ESTADOS_ARCHIVABLES.includes(s.estado))
+      .map((s) => s.idSolicitud);
+
+    if (idsArchivables.length === 0) {
+      throw new HttpException(
+        'Ninguna solicitud del evento se puede archivar en su estado actual',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    await this.solicitudRepository.update(
+      { idSolicitud: In(idsArchivables) },
+      { archivada: true },
+    );
+    return this.solicitudRepository.find({ where: { idLoteEspecial } });
+  }
+
+  /** Desarchiva TODAS las solicitudes del evento de un golpe. */
+  async desarchivarLote(
+    idLoteEspecial: string,
+    usuario: AuthenticatedUser,
+  ): Promise<SolicitudReserva[]> {
+    this.exigirRolGestorEventos(usuario);
+
+    const solicitudes = await this.solicitudRepository.find({
+      where: { idLoteEspecial },
+    });
+    if (solicitudes.length === 0) {
+      throw new HttpException(
+        'Evento especial no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    await this.solicitudRepository.update(
+      { idLoteEspecial },
+      { archivada: false },
+    );
+    return this.solicitudRepository.find({ where: { idLoteEspecial } });
+  }
+
+  /** Soft delete de TODAS las reservas especiales archivadas del sistema
+   * (no solo las del usuario que llama) — ver comentario de
+   * exigirRolGestorEventos. Mismo criterio que vaciarArchivadas: no toca
+   * firma/solicitud_evento/notificacion, Historial/Estadísticas siguen
+   * viendo todo. */
+  async vaciarArchivadasEspeciales(
+    usuario: AuthenticatedUser,
+  ): Promise<number> {
+    this.exigirRolGestorEventos(usuario);
+
+    const resultado = await this.solicitudRepository.update(
+      { idLoteEspecial: Not(IsNull()), archivada: true },
+      { eliminada: true },
+    );
+    return resultado.affected ?? 0;
+  }
+
   /**
    * Paginado en dos pasos por la misma razón que findAll (historial) y
    * BitacoraService.pendientesPorRegistrar: esta versión de TypeORM no
@@ -1432,9 +2004,26 @@ export class SolicitudesService {
           idDocente: usuario.id,
         });
     } else {
-      idQuery.andWhere('solicitud.estado = :estado', {
-        estado: EstadoSolicitud.PENDIENTE_LABORATORISTA,
-      });
+      idQuery
+        .andWhere('solicitud.estado = :estado', {
+          estado: EstadoSolicitud.PENDIENTE_LABORATORISTA,
+        })
+        // El caso normal: solo lo mío (igual que docente). El OR de la
+        // derecha es el fallback para filas legacy sin laboratorista
+        // encargado (ver idLaboratoristaEncargado en la entidad) — sin él,
+        // esas solicitudes pendientes quedarían sin nadie que las vea.
+        .andWhere(
+          `(solicitud.id_laboratorista_encargado = :idLaboratorista
+            OR (
+              solicitud.id_laboratorista_encargado IS NULL
+              AND EXISTS (
+                SELECT 1 FROM laboratorista_laboratorio ll
+                WHERE ll.id_laboratorio = solicitud.id_laboratorio
+                  AND ll.id_usuario = :idLaboratorista
+              )
+            ))`,
+          { idLaboratorista: usuario.id },
+        );
     }
 
     const filas = await idQuery.getRawMany<{ idSolicitud: number }>();
@@ -1461,6 +2050,12 @@ export class SolicitudesService {
         'docenteEncargado.idUsuario',
         'docenteEncargado.nombre',
         'docenteEncargado.correo',
+      ])
+      .leftJoin('solicitud.laboratoristaEncargado', 'laboratoristaEncargado')
+      .addSelect([
+        'laboratoristaEncargado.idUsuario',
+        'laboratoristaEncargado.nombre',
+        'laboratoristaEncargado.correo',
       ])
       .where('solicitud.idSolicitud IN (:...ids)', { ids })
       .getMany();
@@ -1577,6 +2172,12 @@ export class SolicitudesService {
         'docenteEncargado.nombre',
         'docenteEncargado.correo',
       ])
+      .leftJoin('solicitud.laboratoristaEncargado', 'laboratoristaEncargado')
+      .addSelect([
+        'laboratoristaEncargado.idUsuario',
+        'laboratoristaEncargado.nombre',
+        'laboratoristaEncargado.correo',
+      ])
       .where('solicitud.idSolicitud IN (:...ids)', { ids })
       .getMany();
 
@@ -1605,8 +2206,12 @@ export class SolicitudesService {
       });
     }
     if (usuario.rol === 'laboratorista') {
+      // Mismo criterio que docente: todo lo de MIS laboratorios asignados,
+      // no solo lo que ya firmé yo mismo (antes solo mostraba lo que el
+      // propio laboratorista había firmado, dejando fuera lo pendiente o lo
+      // resuelto por otro laboratorista del mismo laboratorio).
       query.andWhere(
-        'EXISTS (SELECT 1 FROM firma f WHERE f.id_solicitud = solicitud.id_solicitud AND f.id_firmante = :idLaboratorista)',
+        'EXISTS (SELECT 1 FROM laboratorista_laboratorio ll WHERE ll.id_laboratorio = solicitud.id_laboratorio AND ll.id_usuario = :idLaboratorista)',
         { idLaboratorista: usuario.id },
       );
     }
@@ -1645,6 +2250,9 @@ export class SolicitudesService {
       query.andWhere('solicitud.fecha_practica <= :fechaHasta', {
         fechaHasta: filtros.fechaHasta,
       });
+    }
+    if (filtros.soloEventosEspeciales) {
+      query.andWhere('solicitud.id_lote_especial IS NOT NULL');
     }
   }
 
@@ -1693,16 +2301,26 @@ export class SolicitudesService {
         .trim(),
     }));
 
-    const solicitudes = await this.solicitudRepository.find({
-      where: {
-        idLaboratorio,
-        fechaPractica: fecha,
-        // Igual criterio que solicitudesAprobadasQueCruzan: una solicitud ya
-        // REALIZADA sigue ocupando su franja en el calendario del día.
-        estado: In([EstadoSolicitud.APROBADA, EstadoSolicitud.REALIZADA]),
-      },
-      relations: { tipoReserva: true },
-    });
+    // Igual criterio que solicitudesAprobadasQueCruzan: una solicitud ya
+    // REALIZADA sigue ocupando su franja, y una CANCELADA que llegó a estar
+    // aprobada tampoco libera el horario antes de su fecha (ver
+    // CONDICION_CANCELADA_TRAS_APROBACION) — se pinta en el calendario para
+    // que quede claro que el laboratorio sigue bloqueado, aunque nadie vaya
+    // a usarlo (ver estaCancelada en BloqueDisponibilidad).
+    const solicitudes = await this.solicitudRepository
+      .createQueryBuilder('solicitud')
+      .leftJoinAndSelect('solicitud.tipoReserva', 'tipoReserva')
+      .where('solicitud.id_laboratorio = :idLaboratorio', { idLaboratorio })
+      .andWhere('solicitud.fecha_practica = :fecha', { fecha })
+      .andWhere(
+        `(solicitud.estado IN (:...estados) OR (${CONDICION_CANCELADA_TRAS_APROBACION}))`,
+        {
+          estados: [EstadoSolicitud.APROBADA, EstadoSolicitud.REALIZADA],
+          cancelada: EstadoSolicitud.CANCELADA,
+          firmaAprobada: ResultadoFirma.APROBADA,
+        },
+      )
+      .getMany();
 
     const bloquesSolicitudes: BloqueDisponibilidad[] = solicitudes.map((s) => ({
       origen: 'solicitud',
@@ -1711,6 +2329,8 @@ export class SolicitudesService {
       esExclusiva: s.tipoReserva.esExclusiva,
       tipoReserva: s.tipoReserva.nombre,
       nombrePractica: s.nombrePractica,
+      esEventoEspecial: s.idLoteEspecial != null,
+      estaCancelada: s.estado === EstadoSolicitud.CANCELADA,
       ...(!s.tipoReserva.esExclusiva && {
         cuposOcupados: this.consumoCupos(s.numPersonas),
         capacidad: laboratorio.capacidad ?? undefined,
@@ -1718,5 +2338,101 @@ export class SolicitudesService {
     }));
 
     return [...bloquesHorario, ...bloquesSolicitudes];
+  }
+
+  /**
+   * Fechas ('YYYY-MM-DD') de un mes con una reserva especial aprobada en
+   * ese laboratorio — liviano a propósito (solo la columna fecha_practica,
+   * sin resolver relaciones) para poder marcarlas en la vista de MES del
+   * calendario con una sola llamada, sin repetir disponibilidad() por cada
+   * día del mes (30 llamadas HTTP solo para pintar la grilla).
+   */
+  async fechasEventoEspecialDelMes(
+    idLaboratorio: number,
+    year: number,
+    month: number,
+  ): Promise<string[]> {
+    const laboratorio = await this.laboratorioRepository.findOne({
+      where: { idLaboratorio },
+    });
+    if (!laboratorio) {
+      throw new HttpException(
+        'Laboratorio no encontrado',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const desde = `${year}-${String(month).padStart(2, '0')}-01`;
+    const ultimoDia = new Date(year, month, 0).getDate();
+    const hasta = `${year}-${String(month).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
+
+    const solicitudes = await this.solicitudRepository.find({
+      where: {
+        idLaboratorio,
+        fechaPractica: Between(desde, hasta),
+        idLoteEspecial: Not(IsNull()),
+        estado: In([EstadoSolicitud.APROBADA, EstadoSolicitud.REALIZADA]),
+      },
+      select: { fechaPractica: true },
+    });
+
+    return solicitudes.map((s) => s.fechaPractica);
+  }
+
+  /**
+   * Solicitudes que ya pasaron de fecha, todavía no tienen bitácora, y
+   * nunca recibieron el aviso BITACORA_PENDIENTE — cubre tanto las
+   * `aprobada` normales (nadie las cerró) como las `cancelada` que llegaron
+   * a estar aprobadas (ver CONDICION_CANCELADA_TRAS_APROBACION): mientras
+   * no pase la fecha siguen bloqueando el horario, así que no tiene sentido
+   * pedir bitácora todavía; una vez pasada, sea que se haya usado o
+   * cancelado, alguien tiene que cerrar el registro.
+   */
+  private async solicitudesPendientesDeBitacora(): Promise<SolicitudReserva[]> {
+    return this.solicitudRepository
+      .createQueryBuilder('solicitud')
+      .where(
+        `(solicitud.estado = :aprobada OR (${CONDICION_CANCELADA_TRAS_APROBACION}))`,
+        {
+          aprobada: EstadoSolicitud.APROBADA,
+          cancelada: EstadoSolicitud.CANCELADA,
+          firmaAprobada: ResultadoFirma.APROBADA,
+        },
+      )
+      .andWhere('solicitud.fecha_practica < CURDATE()')
+      .andWhere(
+        'NOT EXISTS (SELECT 1 FROM registro_uso ru WHERE ru.id_solicitud = solicitud.id_solicitud)',
+      )
+      .andWhere(
+        'NOT EXISTS (SELECT 1 FROM notificacion n WHERE n.id_solicitud = solicitud.id_solicitud AND n.tipo_evento = :tipoBitacoraPendiente)',
+        { tipoBitacoraPendiente: TipoEventoNotificacion.BITACORA_PENDIENTE },
+      )
+      .getMany();
+  }
+
+  /**
+   * Corre una vez al día (ver SolicitudesScheduler): avisa a los
+   * laboratoristas del laboratorio que una reserva suya ya venció sin
+   * bitácora registrada, con un enlace directo al formulario ya precargado
+   * con esa solicitud. Una sola vez por solicitud — no insiste día a día
+   * (ver el NOT EXISTS sobre notificacion en solicitudesPendientesDeBitacora).
+   */
+  async avisarBitacorasPendientes(): Promise<void> {
+    const pendientes = await this.solicitudesPendientesDeBitacora();
+    for (const solicitud of pendientes) {
+      const laboratoristas = await this.todosLosLaboratoristas(
+        solicitud.idLaboratorio,
+      );
+      if (laboratoristas.length === 0) {
+        continue;
+      }
+      await this.notificacionesService.notificar(
+        TipoEventoNotificacion.BITACORA_PENDIENTE,
+        solicitud,
+        laboratoristas,
+        undefined,
+        `/bitacora/nuevo?idSolicitud=${solicitud.idSolicitud}`,
+      );
+    }
   }
 }

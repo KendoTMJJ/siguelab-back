@@ -34,6 +34,10 @@ const ASUNTOS: Record<TipoEventoNotificacion, string> = {
     'Tu solicitud de reserva fue rechazada',
   [TipoEventoNotificacion.SOLICITUD_CANCELADA]:
     'Tu solicitud de reserva fue cancelada',
+  [TipoEventoNotificacion.SOLICITUD_CANCELADA_DOCENTE]:
+    'Un estudiante canceló una reserva aprobada',
+  [TipoEventoNotificacion.BITACORA_PENDIENTE]:
+    'Tienes un registro de bitácora pendiente',
   [TipoEventoNotificacion.SERVICIO_SOLICITADO]:
     'Nueva solicitud de servicio técnico',
   [TipoEventoNotificacion.SERVICIO_COTIZADO]:
@@ -72,6 +76,10 @@ const MENSAJES: Record<TipoEventoNotificacion, string> = {
     'Lamentamos informarte que tu solicitud de reserva fue rechazada.',
   [TipoEventoNotificacion.SOLICITUD_CANCELADA]:
     'Tu solicitud de reserva fue cancelada.',
+  [TipoEventoNotificacion.SOLICITUD_CANCELADA_DOCENTE]:
+    'El estudiante canceló una reserva que ya estaba aprobada para tu asignatura. El laboratorio se mantiene bloqueado hasta la fecha original — no queda disponible para nadie más en ese horario.',
+  [TipoEventoNotificacion.BITACORA_PENDIENTE]:
+    'La fecha de esta reserva ya pasó y todavía no se registró el uso real en bitácora. Ingresa para completarlo.',
   [TipoEventoNotificacion.SERVICIO_SOLICITADO]:
     'Alguien quiere usar el laboratorio: hay una nueva solicitud de servicio técnico esperando revisión y cotización.',
   [TipoEventoNotificacion.SERVICIO_COTIZADO]:
@@ -105,6 +113,8 @@ const COLOR_EVENTO: Record<TipoEventoNotificacion, string> = {
   [TipoEventoNotificacion.SOLICITUD_APROBADA]: '#0ca30c',
   [TipoEventoNotificacion.SOLICITUD_RECHAZADA]: '#d03b3b',
   [TipoEventoNotificacion.SOLICITUD_CANCELADA]: '#71717a',
+  [TipoEventoNotificacion.SOLICITUD_CANCELADA_DOCENTE]: '#71717a',
+  [TipoEventoNotificacion.BITACORA_PENDIENTE]: '#b45309',
   [TipoEventoNotificacion.SERVICIO_SOLICITADO]: '#004f9f',
   [TipoEventoNotificacion.SERVICIO_COTIZADO]: '#004f9f',
   [TipoEventoNotificacion.SERVICIO_APROBADO]: '#0ca30c',
@@ -161,8 +171,13 @@ export class NotificacionesService {
     solicitud: SolicitudReserva,
     destinatarios: DestinatarioNotificacion[],
     motivo?: string,
+    /** Ruta (relativa a FRONTEND_URL) del botón del correo, ej.
+     * `/bitacora/nuevo?idSolicitud=5` — solo BITACORA_PENDIENTE la usa hoy,
+     * para llevar directo al registro en vez del genérico "Ver en Siguelab".
+     * undefined mantiene el link genérico de siempre. */
+    linkPath?: string,
   ): Promise<void> {
-    const cuerpoHtml = this.construirCuerpo(tipoEvento, solicitud, motivo);
+    const cuerpoHtml = this.construirCuerpo(tipoEvento, solicitud, motivo, linkPath);
     await this.encolar(
       tipoEvento,
       { idSolicitud: solicitud.idSolicitud },
@@ -175,6 +190,7 @@ export class NotificacionesService {
     tipoEvento: TipoEventoNotificacion,
     solicitud: SolicitudReserva,
     motivo?: string,
+    linkPath?: string,
   ): string {
     const filas: Array<{ etiqueta: string; valor: string }> = [
       { etiqueta: 'Práctica', valor: escaparHtml(solicitud.nombrePractica) },
@@ -195,6 +211,7 @@ export class NotificacionesService {
       `Solicitud #${solicitud.idSolicitud}`,
       filas,
       motivoRechazo,
+      linkPath,
     );
   }
 
@@ -290,11 +307,16 @@ export class NotificacionesService {
     refLabel: string,
     filas: Array<{ etiqueta: string; valor: string }>,
     motivoRechazo?: string,
+    linkPath?: string,
   ): string {
     const color = COLOR_EVENTO[tipoEvento];
     const titulo = ASUNTOS[tipoEvento];
     const intro = MENSAJES[tipoEvento];
     const appUrl = process.env.FRONTEND_URL || '';
+    // Con linkPath, el botón lleva directo a la acción pendiente (ej.
+    // /bitacora/nuevo?idSolicitud=5) en vez del genérico "Ver en Siguelab".
+    const botonHref = linkPath ? `${appUrl}${linkPath}` : appUrl;
+    const botonTexto = linkPath ? 'Registrar uso' : 'Ver en Siguelab';
 
     const filasHtml = filas
       .map(
@@ -321,7 +343,7 @@ export class NotificacionesService {
       ? `
         <tr>
           <td style="padding:8px 24px 28px;" align="center">
-            <a href="${appUrl}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 28px;border-radius:999px;">Ver en Siguelab</a>
+            <a href="${botonHref}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 28px;border-radius:999px;">${botonTexto}</a>
           </td>
         </tr>`
       : '';

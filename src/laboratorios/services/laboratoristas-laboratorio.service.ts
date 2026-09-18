@@ -10,9 +10,9 @@ export interface LaboratoristaEncargado {
   correo: string;
 }
 
-/** Mismo criterio que DocentesLaboratorioService — puramente informativo
- * (trazabilidad de "quién es el responsable de cada laboratorio"), no
- * restringe qué laboratorios puede ver/gestionar el laboratorista. */
+/** Mismo criterio que DocentesLaboratorioService: define qué laboratoristas
+ * pueden ver/gestionar las solicitudes de cada laboratorio — ver
+ * estaAsociado() y su uso en SolicitudesService. */
 @Injectable()
 export class LaboratoristasLaboratorioService {
   private readonly laboratoristaLaboratorioRepository: Repository<LaboratoristaLaboratorio>;
@@ -98,6 +98,17 @@ export class LaboratoristasLaboratorioService {
       idUsuario,
     });
     return this.laboratoristaLaboratorioRepository.save(asociacion);
+  }
+
+  /** Uso interno del módulo de solicitudes (mismo patrón que
+   * DocenteLaboratorio.estaAsociado): valida el par sin exponer HTTP. */
+  async estaAsociado(
+    idLaboratorio: number,
+    idUsuario: string,
+  ): Promise<boolean> {
+    return this.laboratoristaLaboratorioRepository.exists({
+      where: { idLaboratorio, idUsuario },
+    });
   }
 
   async desasociar(idLaboratorio: number, idUsuario: string): Promise<void> {

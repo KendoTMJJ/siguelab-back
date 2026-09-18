@@ -7,7 +7,9 @@ import {
   EstadoSolicitud,
   SolicitudReserva,
 } from 'src/solicitudes/entities/solicitud-reserva.entity';
+import { ResultadoFirma } from 'src/solicitudes/entities/firma.entity';
 import { SolicitudesService } from 'src/solicitudes/solicitudes.service';
+import { CONDICION_CANCELADA_TRAS_APROBACION } from 'src/solicitudes/utils/cancelada-tras-aprobacion.util';
 import { RegistroUso } from './entities/registro-uso.entity';
 import { CreateRegistroUsoDto } from './dto/create-registro-uso.dto';
 import { UpdateRegistroUsoDto } from './dto/update-registro-uso.dto';
@@ -69,9 +71,11 @@ export class BitacoraService {
       );
     }
 
+    let solicitud: SolicitudReserva | null = null;
     if (dto.idSolicitud) {
-      const solicitud = await this.solicitudRepository.findOne({
+      solicitud = await this.solicitudRepository.findOne({
         where: { idSolicitud: dto.idSolicitud },
+        relations: { firmas: true },
       });
       if (!solicitud) {
         throw new HttpException(
@@ -79,9 +83,22 @@ export class BitacoraService {
           HttpStatus.NOT_FOUND,
         );
       }
-      if (solicitud.estado !== EstadoSolicitud.APROBADA) {
+      // Una CANCELADA que llegó a estar aprobada (todas sus firmas quedaron
+      // en aprobada — ver CONDICION_CANCELADA_TRAS_APROBACION) también se
+      // puede registrar: el laboratorio siguió bloqueado hasta la fecha
+      // aunque el estudiante haya cancelado, así que igual hace falta un
+      // cierre en bitácora. Una cancelada que nunca llegó a aprobarse (o
+      // una rechazada) no aplica:
+      // ahí nunca hubo nada bloqueado que cerrar.
+      const fueAprobada =
+        solicitud.firmas.length > 0 &&
+        solicitud.firmas.every((f) => f.resultado === ResultadoFirma.APROBADA);
+      const puedeRegistrar =
+        solicitud.estado === EstadoSolicitud.APROBADA ||
+        (solicitud.estado === EstadoSolicitud.CANCELADA && fueAprobada);
+      if (!puedeRegistrar) {
         throw new HttpException(
-          'La solicitud debe estar aprobada para registrar bitácora',
+          'La solicitud debe estar aprobada (o cancelada después de estarlo) para registrar bitácora',
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -109,15 +126,18 @@ export class BitacoraService {
       horaInicioReal: dto.horaInicioReal,
       horaFinReal: dto.horaFinReal,
       numAsistentes: dto.numAsistentes ?? 0,
-      novedad: dto.novedad ?? null,
       observaciones: dto.observaciones ?? null,
+      usoLaboratorio: dto.usoLaboratorio,
     });
 
     const guardado = await this.registroUsoRepository.save(registro);
 
     // Cierra el flujo de la solicitud: antes de esto una solicitud aprobada
     // se quedaba "aprobada" para siempre — ver SolicitudesService.marcarRealizada.
-    if (dto.idSolicitud) {
+    // Solo si SIGUE aprobada: una que ya está cancelada (ver arriba) queda
+    // tal cual — registrar bitácora ahí es cerrar el porqué (las
+    // observaciones), no marcar que la práctica sí ocurrió.
+    if (dto.idSolicitud && solicitud?.estado === EstadoSolicitud.APROBADA) {
       await this.solicitudesService.marcarRealizada(
         dto.idSolicitud,
         laboratorista.id,
@@ -221,7 +241,19 @@ export class BitacoraService {
     const idQuery = this.solicitudRepository
       .createQueryBuilder('solicitud')
       .select('solicitud.idSolicitud', 'idSolicitud')
-      .where('solicitud.estado = :estado', { estado: EstadoSolicitud.APROBADA })
+      // Además de las `aprobada` sin cerrar (caso normal), también entran
+      // las `cancelada` que llegaron a estar aprobadas (ver
+      // CONDICION_CANCELADA_TRAS_APROBACION) una vez que ya pasó su fecha —
+      // mientras no pase, el laboratorio sigue bloqueado y no hay nada que
+      // cerrar todavía.
+      .where(
+        `(solicitud.estado = :aprobada OR (${CONDICION_CANCELADA_TRAS_APROBACION} AND solicitud.fecha_practica < CURDATE()))`,
+        {
+          aprobada: EstadoSolicitud.APROBADA,
+          cancelada: EstadoSolicitud.CANCELADA,
+          firmaAprobada: ResultadoFirma.APROBADA,
+        },
+      )
       .andWhere(
         'NOT EXISTS (SELECT 1 FROM registro_uso registro WHERE registro.id_solicitud = solicitud.id_solicitud)',
       );
@@ -325,7 +357,7 @@ export class BitacoraService {
   /**
    * Edición ampliada a propósito (ver UpdateRegistroUsoDto): el
    * laboratorista puede corregir cualquier campo del registro, incluida
-   * fecha/horas/asistentes/laboratorio/tipo, no solo novedad/observaciones.
+   * fecha/horas/asistentes/laboratorio/tipo, no solo observaciones.
    * `idSolicitud` no se puede reasignar; si el registro tiene una solicitud
    * enlazada, `idLaboratorio` debe seguir coincidiendo con la de esa
    * solicitud (misma regla que al crear).
@@ -398,11 +430,11 @@ export class BitacoraService {
     if (dto.numAsistentes !== undefined) {
       registro.numAsistentes = dto.numAsistentes;
     }
-    if (dto.novedad !== undefined) {
-      registro.novedad = dto.novedad;
-    }
     if (dto.observaciones !== undefined) {
       registro.observaciones = dto.observaciones;
+    }
+    if (dto.usoLaboratorio !== undefined) {
+      registro.usoLaboratorio = dto.usoLaboratorio;
     }
 
     return this.registroUsoRepository.save(registro);

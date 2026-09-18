@@ -216,7 +216,7 @@ export class LaboratoriosController {
   @Get(':id/laboratoristas-encargados')
   @ApiOperation({
     summary:
-      'Listar laboratoristas/analistas a cargo de un laboratorio (trazabilidad, no restringe acceso)',
+      'Listar laboratoristas a cargo de un laboratorio — son los únicos que pueden aprobar/rechazar/crear reservas directas para él',
   })
   @ApiResponse({
     status: 200,
@@ -233,7 +233,8 @@ export class LaboratoriosController {
   @Post(':id/laboratoristas-encargados')
   @Roles('admin')
   @ApiOperation({
-    summary: 'Asociar un laboratorista a cargo de un laboratorio',
+    summary:
+      'Asociar un laboratorista a cargo de un laboratorio — sin esto no puede aprobar/rechazar ni crear reservas directas para él',
   })
   @ApiResponse({ status: 201, description: 'Asociación creada' })
   @ApiResponse({

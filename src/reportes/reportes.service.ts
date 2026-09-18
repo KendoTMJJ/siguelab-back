@@ -10,6 +10,7 @@ import {
   LABORATORIO_A_HOJA,
   OBSERVACIONES_LISTA_CERRADA,
   TIPOS_DOCENTE_ES_ESTUDIANTES,
+  USO_LABORATORIO_LISTA_CERRADA,
   USO_LABORATORIO_MAP,
   nombreExcelLaboratorio,
   observacionExcel,
@@ -124,18 +125,23 @@ export class ReportesService {
       });
     }
 
+    // El laboratorista la elige libremente al registrar el uso (ver
+    // CreateRegistroUsoDto.usoLaboratorio) — para registros históricos sin
+    // ese campo (previos a este cambio) se cae al mapeo viejo desde "Tipo
+    // de reserva" como mejor esfuerzo.
     const usoExcel =
-      USO_LABORATORIO_MAP[registro.tipoReserva.nombre] ??
+      registro.usoLaboratorio ||
+      USO_LABORATORIO_MAP[registro.tipoReserva.nombre] ||
       registro.tipoReserva.nombre;
-    if (!USO_LABORATORIO_MAP[registro.tipoReserva.nombre]) {
+    if (!USO_LABORATORIO_LISTA_CERRADA.includes(usoExcel)) {
       problemas.push({
         idRegistro: registro.idRegistro,
         tipo: 'uso_fuera_de_lista',
-        detalle: `"${registro.tipoReserva.nombre}" no está en la lista cerrada de "Uso de Laboratorio" — se exporta tal cual.`,
+        detalle: `"${usoExcel}" no está en la lista cerrada de "Uso de Laboratorio" — se exporta tal cual.`,
       });
     }
 
-    const observaciones = observacionExcel(registro.novedad);
+    const observaciones = observacionExcel(registro.observaciones);
     if (!OBSERVACIONES_LISTA_CERRADA.includes(observaciones)) {
       problemas.push({
         idRegistro: registro.idRegistro,
@@ -149,11 +155,14 @@ export class ReportesService {
     );
     const docente = esTesisOSemillero
       ? 'Estudiantes'
-      : (solicitud?.docenteEncargado.nombre ?? '');
+      : (solicitud?.docenteEncargado?.nombre ?? '');
 
-    const semana = solicitud
-      ? calcularSemana(registro.fecha, solicitud.periodoAcademico)
-      : 'Intersemestral';
+    // Sin periodo académico (evento especial, ver SolicitudReserva.idPeriodo)
+    // no hay semana que calcular — mismo criterio que "sin solicitud".
+    const semana =
+      solicitud && solicitud.periodoAcademico
+        ? calcularSemana(registro.fecha, solicitud.periodoAcademico)
+        : 'Intersemestral';
 
     const fila: FilaAsistencia = {
       semana,
@@ -164,13 +173,13 @@ export class ReportesService {
         registro.horaInicioReal,
         registro.horaFinReal,
       ),
-      nivel: solicitud
+      nivel: solicitud?.facultad
         ? solicitud.facultad.nivel === NivelFacultad.POSGRADO
           ? 'Posgrado'
           : 'Pregrado'
         : '',
-      division: solicitud?.facultad.division.nombre ?? '',
-      facultad: solicitud?.facultad.nombre ?? '',
+      division: solicitud?.facultad?.division.nombre ?? '',
+      facultad: solicitud?.facultad?.nombre ?? '',
       docente,
       laboratorioExcel: nombreExcelLaboratorio(nombreLab),
       numEstudiantes: registro.numAsistentes,

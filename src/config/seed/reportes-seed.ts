@@ -4,18 +4,18 @@
  * hojas reales, sin depender de datos reales de producción — a diferencia de
  * `demo-seed.ts` (pensado para verse bien navegando la UI), este script solo
  * le importa exigir el export: cubre las 14 hojas, mezcla registros con y sin
- * solicitud asociada, tipos de reserva dentro y fuera de la lista cerrada de
- * "Uso de Laboratorio", y observaciones dentro y fuera de la lista cerrada —
- * los mismos casos que ya cubre `/exportar/validar`. No siembra firmas (no
- * hace falta para el export ni para el historial de solicitudes).
+ * solicitud asociada, y valores de "Uso de Laboratorio" y "Observaciones"
+ * dentro y fuera de sus listas cerradas — los mismos casos que ya cubre
+ * `/exportar/validar`. No siembra firmas (no hace falta para el export ni
+ * para el historial de solicitudes).
  *
  * Nunca se ejecuta solo. Correr a mano, dentro del contenedor si usas Docker:
  *   docker compose exec api npm run seed:reportes
  * Requiere que ya exista la base (roles, admin, usuarios demo, catálogos,
  * laboratorios, periodo académico) — se crea sola al levantar la app.
  *
- * Idempotente: si ya hay registros de bitácora marcados con el prefijo
- * "[SeedReportes]" en `observaciones`, no hace nada.
+ * Idempotente: si ya hay una solicitud marcada con el prefijo
+ * "[SeedReportes]" en `nombrePractica`, no hace nada.
  */
 import { NestFactory } from '@nestjs/core';
 import { DataSource } from 'typeorm';
@@ -33,6 +33,7 @@ import { RegistroUso } from 'src/bitacora/entities/registro-uso.entity';
 import {
   LABORATORIO_A_HOJA,
   OBSERVACIONES_LISTA_CERRADA,
+  USO_LABORATORIO_LISTA_CERRADA,
 } from 'src/reportes/constantes/asistencias-excel.constants';
 
 const MARCADOR = '[SeedReportes]';
@@ -40,7 +41,7 @@ const MARCADOR = '[SeedReportes]';
 const TIPOS_ROTACION = [
   'Práctica libre',
   'Investigación / Tesis',
-  'Semillero', // fuera de la lista cerrada del Excel — a propósito.
+  'Semillero',
   'CAU',
   'Marketing',
   'Servicios Externos',
@@ -56,6 +57,7 @@ const FRANJAS: Array<{ inicio: string; fin: string }> = [
 ];
 
 const OBSERVACION_FUERA_DE_LISTA = 'Equipo audiovisual con falla';
+const USO_LABORATORIO_FUERA_DE_LISTA = 'Extensión / Proyección social';
 
 function addDays(fechaIso: string, dias: number): string {
   const fecha = new Date(`${fechaIso}T00:00:00`);
@@ -135,10 +137,16 @@ async function sembrarRegistros(
       const facultad = refs.facultades[n % refs.facultades.length];
       const franja = FRANJAS[n % FRANJAS.length];
       const fecha = addDays(refs.periodo.fechaInicio, n % totalDiasPeriodo);
-      const novedad =
+      const observacion =
         n % 9 === 8
           ? OBSERVACION_FUERA_DE_LISTA
           : OBSERVACIONES_LISTA_CERRADA[n % OBSERVACIONES_LISTA_CERRADA.length];
+      const usoLaboratorio =
+        n % 11 === 10
+          ? USO_LABORATORIO_FUERA_DE_LISTA
+          : USO_LABORATORIO_LISTA_CERRADA[
+              n % USO_LABORATORIO_LISTA_CERRADA.length
+            ];
       // 1 de cada 6 sin solicitud asociada — ejercita el caso
       // "sin_solicitud_asociada" de /exportar/validar.
       const sinSolicitud = n % 6 === 5;
@@ -174,8 +182,8 @@ async function sembrarRegistros(
           horaInicioReal: franja.inicio,
           horaFinReal: franja.fin,
           numAsistentes: 5 + (n % 20),
-          novedad,
-          observaciones: `${MARCADOR} fila ${n + 1}`,
+          observaciones: observacion,
+          usoLaboratorio,
         }),
       );
 
@@ -194,11 +202,11 @@ async function bootstrap(): Promise<void> {
 
   try {
     const dataSource = app.get(DataSource);
-    const registroUsoRepo = dataSource.getRepository(RegistroUso);
+    const solicitudRepo = dataSource.getRepository(SolicitudReserva);
 
-    const yaSembrado = await registroUsoRepo
-      .createQueryBuilder('registro')
-      .where('registro.observaciones LIKE :marcador', {
+    const yaSembrado = await solicitudRepo
+      .createQueryBuilder('solicitud')
+      .where('solicitud.nombre_practica LIKE :marcador', {
         marcador: `${MARCADOR}%`,
       })
       .getExists();

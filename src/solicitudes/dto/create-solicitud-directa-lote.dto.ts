@@ -1,5 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
   IsDateString,
   IsInt,
   IsNotEmpty,
@@ -13,18 +16,40 @@ import {
 
 const HORA_REGEX = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 
-export class CreateSolicitudDto {
+/**
+ * POST /solicitudes/directa-lote (admin/laboratorista): "reserva especial"
+ * de varios días — los MISMOS campos que CreateSolicitudDto (tipo, horario,
+ * aforo, docente encargado, facultad, periodo...), salvo que en vez de una
+ * sola `fechaPractica` se manda un arreglo `fechas` y el mismo horario se
+ * aplica a todas — cada fecha se valida y se crea como una SolicitudReserva
+ * independiente (ver SolicitudesService.crearDirectaLote), agrupadas por
+ * `idLoteEspecial`. Queda aprobada de inmediato, igual que crearDirecta (sin
+ * idLaboratoristaEncargado: no hay paso pendiente que asignarle a nadie).
+ *
+ * `responsable` es el único campo nuevo frente a una reserva normal: texto
+ * libre para el nombre de quien organiza el evento — quien arma una reserva
+ * especial normalmente NO es un docente asociado al laboratorio (es un
+ * comité, una dependencia externa, etc.), así que no alcanza con
+ * idDocenteEncargado (que sigue exigiendo un docente real ya asociado).
+ *
+ * Todo o nada: si cualquier fecha del arreglo no tiene disponibilidad, no se
+ * crea ninguna solicitud del lote.
+ */
+export class CreateSolicitudDirectaLoteDto {
   @ApiProperty({ example: 'b1f0c1d2-1111-4a2b-9c3d-000000000001' })
   @IsUUID()
   idDocenteEncargado!: string;
 
   @ApiProperty({
-    example: 'b1f0c1d2-1111-4a2b-9c3d-000000000003',
+    example: 'Comité de Bienestar Universitario',
+    maxLength: 200,
     description:
-      'Laboratorista encargado de resolver la firma en el paso pendiente_laboratorista — debe estar asociado al laboratorio (ver POST /laboratorios/:id/laboratoristas-encargados).',
+      'Nombre de quien organiza/responde por el evento — no necesariamente un docente del sistema.',
   })
-  @IsUUID()
-  idLaboratoristaEncargado!: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  responsable!: string;
 
   @ApiProperty({ example: 1 })
   @IsInt()
@@ -37,15 +62,12 @@ export class CreateSolicitudDto {
   @ApiProperty({
     example: 1,
     description:
-      'Espacio académico donde se realiza la práctica — obligatorio para cualquier tipo de reserva (lo exige el formato EATUF de la institución, independiente de lo que se reporte en la bitácora).',
+      'Obligatorio para cualquier tipo de reserva (formato EATUF) — mismo criterio que CreateSolicitudDto.',
   })
   @IsInt()
   idEspacio!: number;
 
-  @ApiProperty({
-    example: 1,
-    description: 'id_facultad declarada por el solicitante (trazabilidad)',
-  })
+  @ApiProperty({ example: 1 })
   @IsInt()
   idFacultad!: number;
 
@@ -71,10 +93,6 @@ export class CreateSolicitudDto {
   @IsPositive()
   numGruposTrabajo!: number;
 
-  @ApiProperty({ example: '2026-08-10' })
-  @IsDateString()
-  fechaPractica!: string;
-
   @ApiProperty({ example: '08:00' })
   @Matches(HORA_REGEX, { message: 'horaInicio debe tener formato HH:mm' })
   horaInicio!: string;
@@ -83,7 +101,7 @@ export class CreateSolicitudDto {
   @Matches(HORA_REGEX, { message: 'horaFin debe tener formato HH:mm' })
   horaFin!: string;
 
-  @ApiProperty({ example: 'Práctica de circuitos RC', maxLength: 200 })
+  @ApiProperty({ example: 'Feria de ciencias', maxLength: 200 })
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)
@@ -93,15 +111,6 @@ export class CreateSolicitudDto {
   @IsInt()
   @IsPositive()
   numPersonas!: number;
-
-  @ApiPropertyOptional({
-    example: 5,
-    description: '1 ≤ semana ≤ num_semanas del período',
-  })
-  @IsOptional()
-  @IsInt()
-  @IsPositive()
-  semana?: number;
 
   @ApiPropertyOptional({ example: 'Ácido clorhídrico, agua destilada' })
   @IsOptional()
@@ -117,4 +126,14 @@ export class CreateSolicitudDto {
   @IsOptional()
   @IsString()
   materialesEstudiante?: string;
+
+  @ApiProperty({
+    example: ['2026-10-12', '2026-10-13', '2026-10-14'],
+    description: 'Un día por elemento — sin duplicados, mínimo 1, máximo 31.',
+  })
+  @IsDateString({}, { each: true })
+  @ArrayUnique()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(31)
+  fechas!: string[];
 }

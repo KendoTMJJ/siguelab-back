@@ -164,5 +164,77 @@ describe('UsuariosService', () => {
         service.update('id-que-no-existe', { idRol: OTRO_UUID_ROL }),
       ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
     });
+
+    it('cambia solo el nombre, sin tocar el rol', async () => {
+      const usuarioExistente = {
+        idUsuario: UUID_USUARIO,
+        nombre: 'Nombre Viejo',
+        correo: 'original@usantoto.edu.co',
+        estado: EstadoUsuario.ACTIVO,
+        rol: rolEstudiante,
+      };
+      usuarioRepository.findOne.mockResolvedValue(usuarioExistente);
+
+      const actualizado = await service.update(UUID_USUARIO, {
+        nombre: '  Nombre Nuevo  ',
+      });
+
+      expect(actualizado).toMatchObject({
+        nombre: 'Nombre Nuevo',
+        rol: rolEstudiante,
+      });
+    });
+
+    it('cambia rol y nombre juntos cuando ambos vienen en el dto', async () => {
+      const usuarioExistente = {
+        idUsuario: UUID_USUARIO,
+        nombre: 'Nombre Viejo',
+        correo: 'original@usantoto.edu.co',
+        estado: EstadoUsuario.ACTIVO,
+        rol: rolEstudiante,
+      };
+      usuarioRepository.findOne.mockResolvedValue(usuarioExistente);
+
+      const actualizado = await service.update(UUID_USUARIO, {
+        idRol: OTRO_UUID_ROL,
+        nombre: 'Nombre Nuevo',
+      });
+
+      expect(actualizado).toMatchObject({
+        nombre: 'Nombre Nuevo',
+        rol: { idRol: OTRO_UUID_ROL },
+      });
+    });
+  });
+
+  describe('actualizarNombrePropio', () => {
+    it('actualiza el nombre y lo recorta (trim), sin tocar el rol', async () => {
+      const usuarioExistente = {
+        idUsuario: UUID_USUARIO,
+        nombre: 'Nombre Viejo',
+        correo: 'original@usantoto.edu.co',
+        estado: EstadoUsuario.ACTIVO,
+        rol: rolEstudiante,
+      };
+      usuarioRepository.findOne.mockResolvedValue(usuarioExistente);
+
+      const actualizado = await service.actualizarNombrePropio(
+        UUID_USUARIO,
+        '  Nombre Nuevo  ',
+      );
+
+      expect(actualizado).toMatchObject({
+        nombre: 'Nombre Nuevo',
+        rol: rolEstudiante,
+      });
+    });
+
+    it('lanza NOT_FOUND si el usuario no existe', async () => {
+      usuarioRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.actualizarNombrePropio('id-que-no-existe', 'Nombre'),
+      ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
+    });
   });
 });

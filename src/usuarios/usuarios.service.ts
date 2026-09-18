@@ -158,15 +158,21 @@ export class UsuariosService {
     return usuario;
   }
 
-  /** Lo único editable es el rol (ver UpdateUsuarioDto): nombre/correo los
-   * gobierna Entra ID en cada login. */
+  /** Patch parcial de verdad (ver UpdateUsuarioDto): solo toca los campos que
+   * vienen definidos. El correo no es editable ni desde acá — es el enlace
+   * estable con la cuenta de Entra ID (ver findOrCreateByOid). */
   async update(
     id: string,
     updateUsuarioDto: UpdateUsuarioDto,
   ): Promise<Usuario> {
     try {
       const usuario = await this.findOne(id);
-      usuario.rol = { idRol: updateUsuarioDto.idRol } as Usuario['rol'];
+      if (updateUsuarioDto.idRol !== undefined) {
+        usuario.rol = { idRol: updateUsuarioDto.idRol } as Usuario['rol'];
+      }
+      if (updateUsuarioDto.nombre !== undefined) {
+        usuario.nombre = updateUsuarioDto.nombre.trim();
+      }
 
       return await this.usuarioRepository.save(usuario);
     } catch (error) {
@@ -176,6 +182,14 @@ export class UsuariosService {
         HttpStatus.BAD_REQUEST,
       );
     }
+  }
+
+  /** PATCH /usuarios/me — el propio usuario editando su nombre visible. Solo
+   * ese campo: el rol nunca se toca por esta vía (ver UpdateUsuarioPropioDto). */
+  async actualizarNombrePropio(id: string, nombre: string): Promise<Usuario> {
+    const usuario = await this.findOne(id);
+    usuario.nombre = nombre.trim();
+    return this.usuarioRepository.save(usuario);
   }
 
   async remove(id: string): Promise<void> {

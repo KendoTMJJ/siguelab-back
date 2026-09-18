@@ -10,13 +10,17 @@ import {
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { UsuariosService } from './usuarios.service';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
+import { UpdateUsuarioPropioDto } from './dto/update-usuario-propio.dto';
 import { Roles } from 'src/auth/jwt/roles.decorator';
 import { resolvePagination } from 'src/common/pagination/pagination.util';
+import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from 'src/auth/decorators/current-user.decorator';
 
 /**
  * No hay endpoint de creación: los usuarios se dan de alta solos en su
  * primer login con Microsoft (ver UsuariosService.findOrCreateByOid). El
- * admin solo puede listar, ver, cambiar el rol y eliminar.
+ * admin puede listar, ver, cambiar el rol/nombre y eliminar; cualquier
+ * usuario autenticado puede editar su propio nombre vía PATCH /usuarios/me.
  */
 @ApiTags('usuarios')
 @Controller('usuarios')
@@ -74,6 +78,21 @@ export class UsuariosController {
   @Roles('admin', 'laboratorista')
   findOne(@Param('id') id: string) {
     return this.usuariosService.findOne(id);
+  }
+
+  /**
+   * Antes de la ruta ':id' a propósito: '/usuarios/me' matchearía contra
+   * ':id' (con "me" como valor literal) si esta se declarara después.
+   */
+  @Patch('me')
+  @ApiOperation({ summary: 'El usuario autenticado edita su propio nombre' })
+  @ApiResponse({ status: 200, description: 'Nombre actualizado' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  actualizarPropio(
+    @CurrentUser() usuario: AuthenticatedUser,
+    @Body() dto: UpdateUsuarioPropioDto,
+  ) {
+    return this.usuariosService.actualizarNombrePropio(usuario.id, dto.nombre);
   }
 
   @Patch(':id')

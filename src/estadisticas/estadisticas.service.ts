@@ -11,7 +11,6 @@ import {
 } from 'src/solicitudes/entities/solicitud-reserva.entity';
 import { RegistroUso } from 'src/bitacora/entities/registro-uso.entity';
 import { NivelFacultad } from 'src/catalogos/entities/facultad.entity';
-import { USO_LABORATORIO_MAP } from 'src/reportes/constantes/asistencias-excel.constants';
 
 export interface FiltrosEstadisticas {
   idPeriodo?: number;
@@ -482,10 +481,12 @@ export class EstadisticasService {
   }
 
   /**
-   * Matriz cruda "tipo de reserva real x facultad" (suma de horas) — se
-   * agrupa por el nombre nativo de tipo_reserva porque el mapeo a la lista
-   * cerrada de "Uso de Laboratorio" vive en JS (USO_LABORATORIO_MAP), no en
-   * SQL; agruparPorCategoriaCerrada la colapsa después.
+   * Matriz "Uso de Laboratorio x facultad" (suma de horas). Se agrupa
+   * directamente por `registro.uso_laboratorio` — el laboratorista la fija
+   * al registrar el uso (ver CreateRegistroUsoDto.usoLaboratorio), ya como
+   * valor de la lista cerrada, sin mapeo. El COALESCE es solo para
+   * registros históricos sin ese campo (previos a este cambio): mejor
+   * esfuerzo cayendo al nombre de "Tipo de reserva".
    */
   private async contarHorasUsoPorTipoYFacultad(
     filtros: FiltrosEstadisticas,
@@ -504,13 +505,16 @@ export class EstadisticasService {
         'facultad',
         'facultad.id_facultad = solicitud.id_facultad',
       )
-      .select('tipoReserva.nombre', 'categoria')
+      .select(
+        'COALESCE(registro.uso_laboratorio, tipoReserva.nombre)',
+        'categoria',
+      )
       .addSelect('facultad.nombre', 'facultad')
       .addSelect(
         'SUM(TIMESTAMPDIFF(MINUTE, registro.hora_inicio_real, registro.hora_fin_real)) / 60',
         'total',
       )
-      .groupBy('tipoReserva.nombre')
+      .groupBy('COALESCE(registro.uso_laboratorio, tipoReserva.nombre)')
       .addGroupBy('facultad.nombre');
 
     if (usuario.rol === 'docente') {
@@ -559,32 +563,13 @@ export class EstadisticasService {
   }
 
   /**
-   * tipo_reserva.nombre -> categoria de la lista cerrada "Uso de
-   * Laboratorio" (mismo mapeo que el export a Excel, ver
-   * USO_LABORATORIO_MAP) y re-suma lo que haya quedado separado por
-   * compartir categoria. Se acumula por objeto, no por texto partido con
-   * split(' ') -- categoria y facultad casi siempre traen espacios, un
-   * split ingenuo mezclaria mal los nombres al reconstruirlos.
+   * `contarHorasUsoPorTipoYFacultad` ya agrupa en SQL por la categoría
+   * cerrada exacta — acá solo se ordena para una salida estable.
    */
   private agruparPorCategoriaCerrada(
     filas: UsoPorCategoriaYFacultad[],
   ): UsoPorCategoriaYFacultad[] {
-    const acumulado = new Map<string, UsoPorCategoriaYFacultad>();
-    for (const fila of filas) {
-      const categoria = USO_LABORATORIO_MAP[fila.categoria] ?? fila.categoria;
-      const clave = categoria + '||' + fila.facultad;
-      const existente = acumulado.get(clave);
-      if (existente) {
-        existente.total += fila.total;
-      } else {
-        acumulado.set(clave, {
-          categoria,
-          facultad: fila.facultad,
-          total: fila.total,
-        });
-      }
-    }
-    return [...acumulado.values()]
+    return filas
       .map((fila) => ({ ...fila, total: Math.round(fila.total * 10) / 10 }))
       .sort(
         (a, b) =>

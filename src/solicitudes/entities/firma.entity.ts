@@ -22,8 +22,12 @@ export enum ResultadoFirma {
 
 /**
  * Sin controlador propio: la gestiona por completo el service de solicitudes.
- * id_firmante nullable a propósito (se llena solo al resolverse la firma;
- * en la bandeja compartida de laboratorista no se sabe de antemano quién).
+ * id_firmante se llena de entrada con quien quedó asignado (docente
+ * encargado / laboratorista encargado, ver create() en SolicitudesService) —
+ * sigue siendo nullable porque las filas de reserva especial y las
+ * solicitudes creadas antes de existir "laboratorista encargado" no tienen a
+ * nadie asignado de antemano (ver idLaboratoristaEncargado en
+ * SolicitudReserva); en esos casos queda null hasta que alguien la resuelve.
  */
 @Entity('firma')
 @Index(['idSolicitud', 'orden'], { unique: true })

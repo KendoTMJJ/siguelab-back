@@ -23,6 +23,17 @@ export enum TipoEventoNotificacion {
   SOLICITUD_APROBADA = 'solicitud_aprobada',
   SOLICITUD_RECHAZADA = 'solicitud_rechazada',
   SOLICITUD_CANCELADA = 'solicitud_cancelada',
+  /** Al docente encargado, cuando el estudiante cancela una solicitud que ya
+   * había llegado a `aprobada` — a diferencia de SOLICITUD_CANCELADA (al
+   * propio solicitante), esta es solo informativa: el laboratorio sigue
+   * bloqueado hasta la fecha original, no hay nada que el docente deba
+   * hacer. Ver SolicitudesService.cancelar. */
+  SOLICITUD_CANCELADA_DOCENTE = 'solicitud_cancelada_docente',
+  /** A los laboratoristas del laboratorio: una reserva (aprobada, o
+   * cancelada después de estarlo) ya pasó de fecha y todavía no tiene
+   * bitácora registrada. Se manda una sola vez por solicitud — ver
+   * SolicitudesService.avisarBitacorasPendientes. */
+  BITACORA_PENDIENTE = 'bitacora_pendiente',
   SERVICIO_SOLICITADO = 'servicio_solicitado',
   SERVICIO_COTIZADO = 'servicio_cotizado',
   SERVICIO_APROBADO = 'servicio_aprobado',

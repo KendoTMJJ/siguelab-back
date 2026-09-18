@@ -381,7 +381,8 @@ async function seedBitacora(
       horaInicioReal: '08:05',
       horaFinReal: '09:55',
       numAsistentes: 7,
-      observaciones: '[Demo] Sesión sin novedad.',
+      observaciones: 'Ninguno',
+      usoLaboratorio: 'Prácticas Libres',
     }),
     registroUsoRepo.create({
       idLaboratorio: refs.labAutomatizacion.idLaboratorio,
@@ -391,9 +392,8 @@ async function seedBitacora(
       horaInicioReal: '15:00',
       horaFinReal: '17:00',
       numAsistentes: 5,
-      novedad: 'Docente ausente',
-      observaciones:
-        '[Demo] Uso sin reserva asociada (eventualidad histórica).',
+      observaciones: 'Docente ausente',
+      usoLaboratorio: 'Investigación - Tesis',
     }),
   ]);
   console.log('2 registros de bitácora de ejemplo creados.');

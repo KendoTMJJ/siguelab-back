@@ -1,16 +1,30 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 /**
- * PATCH /usuarios/:id — exclusivo del admin (ver @Roles en el controller):
- * lo ÚNICO editable es el rol. El nombre y el correo los resuelve Entra ID
- * en cada login (ver JwtStrategy.validate / UsuariosService.findOrCreateByOid),
- * así que editarlos aquí no tendría efecto — el próximo login los
- * sobrescribiría. Con `forbidNonWhitelisted: true` global (src/main.ts),
- * mandar nombre/correo en el body hace que la petición se rechace con 400.
+ * PATCH /usuarios/:id — exclusivo del admin (ver @Roles en el controller).
+ * Ambos campos son opcionales (patch parcial de verdad): el admin puede
+ * mandar solo el rol, solo el nombre, o los dos juntos. El correo sigue sin
+ * ser editable: lo resuelve Entra ID en el primer login (ver
+ * UsuariosService.findOrCreateByOid) y es el enlace estable con esa cuenta,
+ * cambiarlo a mano rompería ese enlace.
  */
 export class UpdateUsuarioDto {
-  @ApiProperty({ format: 'uuid' })
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
   @IsUUID()
-  idRol!: string;
+  idRol?: string;
+
+  @ApiPropertyOptional({ example: 'Ana María Pérez', maxLength: 150 })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(150)
+  nombre?: string;
 }

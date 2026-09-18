@@ -1,13 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsDateString,
+  IsIn,
   IsInt,
   IsOptional,
-  IsString,
   Matches,
   Min,
-  MaxLength,
 } from 'class-validator';
+import {
+  OBSERVACIONES_LISTA_CERRADA,
+  USO_LABORATORIO_LISTA_CERRADA,
+} from 'src/reportes/constantes/asistencias-excel.constants';
 
 const HORA_REGEX = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 
@@ -46,14 +49,18 @@ export class CreateRegistroUsoDto {
   @Min(0)
   numAsistentes?: number;
 
-  @ApiPropertyOptional({ example: 'Docente ausente', maxLength: 60 })
-  @IsOptional()
-  @IsString()
-  @MaxLength(60)
-  novedad?: string;
+  /** Alimenta la columna "Observaciones" del Excel de asistencias (ver
+   * reportes/constantes/asistencias-excel.constants.ts) — por eso es
+   * obligatorio y se restringe a la lista cerrada que ese archivo exige,
+   * para que el Excel siempre reciba un valor válido. */
+  @ApiProperty({ example: 'Ninguno', enum: OBSERVACIONES_LISTA_CERRADA })
+  @IsIn(OBSERVACIONES_LISTA_CERRADA)
+  observaciones!: string;
 
-  @ApiPropertyOptional({ example: 'Se realizó la práctica sin novedad' })
-  @IsOptional()
-  @IsString()
-  observaciones?: string;
+  /** Alimenta la columna "Uso de Laboratorio" del Excel de asistencias — el
+   * laboratorista la elige libremente entre las 8 categorías cerradas, sin
+   * quedar atado a lo que mapea "Tipo de reserva" (idTipo). */
+  @ApiProperty({ example: 'Docencia', enum: USO_LABORATORIO_LISTA_CERRADA })
+  @IsIn(USO_LABORATORIO_LISTA_CERRADA)
+  usoLaboratorio!: string;
 }
